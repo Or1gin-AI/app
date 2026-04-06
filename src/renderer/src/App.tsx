@@ -9,7 +9,7 @@ import { MainPage } from '@/pages/MainPage'
 type Page = 'login' | 'network' | 'main'
 
 // Mock: toggle this to test network setup flow
-const MOCK_NETWORK_OK = true
+const MOCK_NETWORK_OK = false
 
 const pageTransition = {
   initial: { opacity: 0 },

@@ -1,6 +1,7 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, nativeImage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import icon from '../../resources/icon.icns?asset'
 
 function createWindow(): void {
   const isMac = process.platform === 'darwin'
@@ -20,10 +21,11 @@ function createWindow(): void {
         height: 36
       }
     }),
-    trafficLightPosition: isMac ? { x: 16, y: 11 } : undefined,
+    trafficLightPosition: isMac ? { x: 16, y: 10 } : undefined,
     backgroundColor: '#faf8f5',
     show: false,
     autoHideMenuBar: true,
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -52,6 +54,11 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
+
+  // Set dock icon on macOS
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(nativeImage.createFromPath(icon))
+  }
 
   createWindow()
 
