@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, nativeImage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.icns?asset'
+import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
   const isMac = process.platform === 'darwin'
