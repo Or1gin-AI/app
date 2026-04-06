@@ -1,6 +1,6 @@
 import { useLocale } from '@/i18n/context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
-import logoImg from '@/assets/logo.png'
+import logoImg from '@/assets/icon-transparent.png'
 
 interface LoginPageProps {
   onLogin: () => void

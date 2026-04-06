@@ -11,7 +11,7 @@ function createWindow(): void {
     resizable: false,
     maximizable: false,
     fullscreenable: false,
-    frame: false,
+    frame: isMac ? true : false,
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac ? {} : {
       titleBarOverlay: {
@@ -20,7 +20,7 @@ function createWindow(): void {
         height: 36
       }
     }),
-    trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
+    trafficLightPosition: isMac ? { x: 16, y: 11 } : undefined,
     backgroundColor: '#faf8f5',
     show: false,
     autoHideMenuBar: true,
