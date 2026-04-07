@@ -28,6 +28,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     status: () => ipcRenderer.invoke('sidecar:status'),
     verify: () => ipcRenderer.invoke('sidecar:verify')
   },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get'),
+    set: (settings: {
+      rememberPassword: boolean
+      autoLogin: boolean
+      autoLaunch: boolean
+      savedEmail: string
+      savedPassword: string
+    }) => ipcRenderer.invoke('settings:set', settings),
+  },
   health: {
     start: () => ipcRenderer.invoke('health:start'),
     stop: () => ipcRenderer.invoke('health:stop'),

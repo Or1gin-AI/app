@@ -36,6 +36,22 @@ declare global {
         signOut: () => Promise<AuthResponse>
         restoreSession: () => Promise<{ ok: boolean; user?: { email: string; name: string } }>
       }
+      settings: {
+        get: () => Promise<{
+          rememberPassword: boolean
+          autoLogin: boolean
+          autoLaunch: boolean
+          savedEmail: string
+          savedPassword: string
+        }>
+        set: (settings: {
+          rememberPassword: boolean
+          autoLogin: boolean
+          autoLaunch: boolean
+          savedEmail: string
+          savedPassword: string
+        }) => Promise<{ ok: boolean }>
+      }
       sidecar: {
         start: (preProxy?: string) => Promise<{ ok: boolean; error?: string }>
         stop: () => Promise<{ ok: boolean }>

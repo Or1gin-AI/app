@@ -39,6 +39,10 @@ export const en = {
     validPwdNumber: 'Contains number',
     validPwdSpecial: 'Contains special character',
     validPwdMatch: 'Passwords match',
+    // Login options
+    rememberPassword: 'Remember password',
+    autoLogin: 'Auto login',
+    autoLaunch: 'Launch at startup',
     // Errors
     errorPasswordMismatch: 'Passwords do not match',
     errorFieldsRequired: 'Please fill in all fields',

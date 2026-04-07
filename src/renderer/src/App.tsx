@@ -92,6 +92,13 @@ function App(): React.JSX.Element {
     } catch {
       // proceed anyway
     }
+    // Disable auto-login on manual logout
+    try {
+      const s = await window.electronAPI.settings.get()
+      if (s.autoLogin) {
+        await window.electronAPI.settings.set({ ...s, autoLogin: false })
+      }
+    } catch { /* */ }
     // Stop health check
     window.electronAPI.health.stop()
     if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }

@@ -39,6 +39,10 @@ export const zh = {
     validPwdNumber: '包含数字',
     validPwdSpecial: '包含特殊字符',
     validPwdMatch: '两次密码一致',
+    // Login options
+    rememberPassword: '记住密码',
+    autoLogin: '自动登录',
+    autoLaunch: '开机自启',
     // Errors
     errorPasswordMismatch: '两次输入的密码不一致',
     errorFieldsRequired: '请填写所有字段',
