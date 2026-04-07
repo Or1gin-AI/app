@@ -5,7 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -140,52 +140,23 @@ function fetchExitIpDirect(): Promise<string | null> {
   })
 }
 
-/** Fetch exit IP through proxy via HTTPS CONNECT tunnel to icanhazip.com */
+/** Fetch exit IP through proxy: just shell out to curl, most reliable way */
 function fetchExitIpViaProxy(): Promise<string | null> {
-  const https = require('node:https') as typeof import('node:https')
+  const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    // Step 1: HTTP CONNECT to establish tunnel through sing-box
-    const connectReq = http.request({
-      hostname: '127.0.0.1',
-      port: 12345,
-      method: 'CONNECT',
-      path: 'icanhazip.com:443',
-      timeout: 10000
-    })
-
-    connectReq.on('connect', (_res, socket) => {
-      // Step 2: TLS handshake through the tunnel
-      const tlsReq = https.request(
-        {
-          hostname: 'icanhazip.com',
-          path: '/',
-          method: 'GET',
-          socket,
-          agent: false,
-          timeout: 10000
-        },
-        (res) => {
-          let body = ''
-          res.on('data', (chunk) => (body += chunk))
-          res.on('end', () => resolve(body.trim() || null))
-        }
-      )
-      tlsReq.on('error', () => resolve(null))
-      tlsReq.on('timeout', () => { tlsReq.destroy(); resolve(null) })
-      tlsReq.end()
-    })
-
-    connectReq.on('error', () => resolve(null))
-    connectReq.on('timeout', () => { connectReq.destroy(); resolve(null) })
-    connectReq.end()
+    execFile('curl', ['-s', '--max-time', '10', '-x', 'http://127.0.0.1:12345', 'https://icanhazip.com'],
+      (err, stdout) => {
+        if (err) { resolve(null); return }
+        resolve(stdout.trim() || null)
+      }
+    )
   })
 }
 
-/** Get exit IP: through proxy when sidecar running, direct to VPS otherwise */
-function fetchExitIp(): Promise<string | null> {
-  if (isSidecarRunning()) {
-    return fetchExitIpViaProxy()
-  }
+/** Get exit IP: always try proxy first, fallback to direct */
+async function fetchExitIp(): Promise<string | null> {
+  const proxyIp = await fetchExitIpViaProxy()
+  if (proxyIp) return proxyIp
   return fetchExitIpDirect()
 }
 
@@ -228,6 +199,23 @@ ipcMain.handle('check-ip', async () => {
 // Quick IP ping (renderer can call this for lightweight checks)
 ipcMain.handle('check-ip-quick', async () => {
   const ip = await fetchExitIp()
+  return { ok: ip !== null, ip }
+})
+
+// Local IP: curl icanhazip directly, no proxy
+ipcMain.handle('check-local-ip', async () => {
+  const { execFile } = require('child_process') as typeof import('child_process')
+  return new Promise<{ ok: boolean; ip: string | null }>((resolve) => {
+    execFile('curl', ['-s', '--max-time', '5', 'https://icanhazip.com'], (err, stdout) => {
+      const ip = err ? null : stdout.trim() || null
+      resolve({ ok: ip !== null, ip })
+    })
+  })
+})
+
+// Proxy IP: curl through proxy
+ipcMain.handle('check-proxy-ip', async () => {
+  const ip = await fetchExitIpViaProxy()
   return { ok: ip !== null, ip }
 })
 
@@ -379,7 +367,7 @@ ipcMain.handle('auth:sign-out', async () => {
 ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   const result = await startSidecar(preProxy)
   if (result.ok) {
-    // Set PAC proxy on all windows
+
     const pac = generatePacScript()
     for (const win of BrowserWindow.getAllWindows()) {
       await win.webContents.session.setProxy({
@@ -392,7 +380,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
 
 ipcMain.handle('sidecar:stop', async () => {
   await stopSidecar()
-  // Reset proxy
+
   for (const win of BrowserWindow.getAllWindows()) {
     await win.webContents.session.setProxy({ mode: 'direct' })
   }
@@ -420,6 +408,26 @@ app.whenReady().then(() => {
   }
 
   createWindow()
+
+  // Monitor sidecar crashes — immediately notify renderer
+  onSidecarCrash((reason) => {
+  
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('network-health', { ok: false, ip: null })
+        if (win.isMinimized()) win.restore()
+        win.focus()
+      }
+    }
+    const { Notification: ElectronNotification } = require('electron')
+    if (ElectronNotification.isSupported()) {
+      new ElectronNotification({
+        title: 'OriginAI',
+        body: `Proxy service crashed: ${reason}`,
+        icon
+      }).show()
+    }
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

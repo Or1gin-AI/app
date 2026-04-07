@@ -12,8 +12,9 @@ import type { PlanId } from '@/pages/PlanPage'
 type Page = 'loading' | 'login' | 'network' | 'network-status' | 'main' | 'plan'
 
 // Mock plan data — backend not ready yet
-const MOCK_PLAN: PlanId = 'pro'
+const MOCK_PLAN: PlanId = '20x'
 const MOCK_EXPIRES = '2026-05-07'
+const MOCK_BALANCE = 166.50
 
 const pageTransition = {
   initial: { opacity: 0 },
@@ -25,6 +26,7 @@ const pageTransition = {
 function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('loading')
   const [userEmail, setUserEmail] = useState('')
+  const [userName, setUserName] = useState('')
   const [userPlan] = useState<PlanId>(MOCK_PLAN)
   const [networkOk, setNetworkOk] = useState(true)
   const [exitIp, setExitIp] = useState<string | null>(null)
@@ -35,6 +37,7 @@ function App(): React.JSX.Element {
     window.electronAPI.auth.restoreSession().then((res) => {
       if (res.ok && res.user) {
         setUserEmail(res.user.email)
+        setUserName(res.user.name ?? '')
         setPage('network')
       } else {
         setPage('login')
@@ -70,12 +73,17 @@ function App(): React.JSX.Element {
 
   const handleLogin = useCallback((user: { email: string; name: string }) => {
     setUserEmail(user.email)
+    setUserName(user.name)
     setPage('network')
   }, [])
 
-  const handleNetworkComplete = useCallback(() => {
+  const handleNetworkComplete = useCallback(async () => {
     setNetworkOk(true)
     setPage('main')
+    // Immediately refresh exit IP after optimization
+    const res = await window.electronAPI.checkIpQuick()
+    setNetworkOk(res.ok)
+    setExitIp(res.ip)
   }, [])
 
   const handleLogout = useCallback(async () => {
@@ -141,14 +149,12 @@ function App(): React.JSX.Element {
           )}
           {page === 'main' && (
             <motion.div key="main" className="flex-1 flex flex-col min-h-0" {...pageTransition}>
-              <MainPage />
+              <MainPage userName={userName} />
             </motion.div>
           )}
           {page === 'network-status' && (
             <motion.div key="network-status" className="flex-1 flex flex-col min-h-0" {...pageTransition}>
               <NetworkStatusPage
-                networkOk={networkOk}
-                exitIp={exitIp}
                 onBack={handleNetworkStatusBack}
                 onReconfigure={() => setPage('network')}
               />
@@ -160,6 +166,7 @@ function App(): React.JSX.Element {
                 currentPlan={userPlan}
                 expiresAt={MOCK_EXPIRES}
                 userEmail={userEmail}
+                balance={MOCK_BALANCE}
                 onBack={handlePlanBack}
               />
             </motion.div>

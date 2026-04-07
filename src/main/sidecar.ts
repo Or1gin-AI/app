@@ -7,6 +7,12 @@ import http from 'node:http'
 const LOCAL_PORT = 12345
 const DEFAULT_PRE_PROXY = '127.0.0.1:7890'
 
+// Callback for when sidecar crashes after successful start
+let onCrashCallback: ((reason: string) => void) | null = null
+export function onSidecarCrash(cb: (reason: string) => void): void {
+  onCrashCallback = cb
+}
+
 const REMOTE = {
   type: 'shadowsocks' as const,
   server: '13.113.99.64',
@@ -169,10 +175,21 @@ export async function startSidecar(preProxy?: string): Promise<{ ok: boolean; er
         }
       }, 500)
 
-      sidecarProcess.on('error', (err) => done({ ok: false, error: err.message }))
+      sidecarProcess.on('error', (err) => {
+        if (!resolved) {
+          done({ ok: false, error: err.message })
+        } else {
+          sidecarProcess = null
+          onCrashCallback?.(`Sing-box error: ${err.message}`)
+        }
+      })
       sidecarProcess.on('exit', (code) => {
         sidecarProcess = null
-        done({ ok: false, error: `Sing-box exited with code ${code}` })
+        if (!resolved) {
+          done({ ok: false, error: `Sing-box exited with code ${code}` })
+        } else {
+          onCrashCallback?.(`Sing-box exited with code ${code}`)
+        }
       })
     } catch (err) {
       resolve({ ok: false, error: String(err) })

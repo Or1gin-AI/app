@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   checkIp: () => ipcRenderer.invoke('check-ip'),
   checkIpQuick: () => ipcRenderer.invoke('check-ip-quick'),
+  checkLocalIp: () => ipcRenderer.invoke('check-local-ip'),
+  checkProxyIp: () => ipcRenderer.invoke('check-proxy-ip'),
   detectSystemProxy: () => ipcRenderer.invoke('detect-system-proxy'),
   auth: {
     signUp: (username: string, email: string, password: string) =>

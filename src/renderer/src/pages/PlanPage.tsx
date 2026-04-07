@@ -7,6 +7,7 @@ interface PlanPageProps {
   currentPlan: PlanId
   expiresAt: string
   userEmail: string
+  balance: number
   onBack: () => void
 }
 
@@ -28,7 +29,7 @@ type ModalState =
   | { step: 'downgrade'; target: PlanId }
   | { step: 'done'; target: PlanId }
 
-export function PlanPage({ currentPlan, expiresAt, userEmail, onBack }: PlanPageProps) {
+export function PlanPage({ currentPlan, expiresAt, userEmail, balance, onBack }: PlanPageProps) {
   const { t } = useLocale()
   const [modal, setModal] = useState<ModalState>(null)
 
@@ -41,12 +42,14 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, onBack }: PlanPage
 
   const handleConfirm = () => {
     if (!modal) return
-    const targetIdx = PLAN_ORDER.indexOf(modal.target)
-    if (modal.target === 'free') {
+    if (isDowngrade(modal.target)) {
+      // All downgrades: take effect at end of current period
       setModal({ step: 'downgrade', target: modal.target })
     } else if (currentPlan !== 'free') {
+      // Upgrade from paid plan: override with prorate
       setModal({ step: 'override', target: modal.target })
     } else {
+      // Upgrade from free: direct
       setModal({ step: 'done', target: modal.target })
     }
   }
@@ -90,6 +93,10 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, onBack }: PlanPage
             <div className="shrink-0">
               <p className="text-text-faint text-xs font-mono mb-1">{t.plan.expiresAt}</p>
               <p className="text-text-secondary">{currentPlan === 'free' ? '—' : expiresAt}</p>
+            </div>
+            <div className="shrink-0">
+              <p className="text-text-faint text-xs font-mono mb-1">{t.plan.balance}</p>
+              <p className="text-text font-medium">{CURRENCY}{balance.toFixed(2)}</p>
             </div>
           </div>
         </div>
@@ -200,7 +207,9 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, onBack }: PlanPage
               <>
                 <h3 className="font-serif text-base text-text mb-2">{t.plan.downgradeTitle}</h3>
                 <p className="text-sm text-text-muted mb-5">
-                  {t.plan.downgradeDesc.replace('{date}', expiresAt)}
+                  {t.plan.downgradeDesc
+                    .replace('{plan}', planLabel(modal.target))
+                    .replace('{date}', expiresAt)}
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -225,7 +234,9 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, onBack }: PlanPage
                 <h3 className="font-serif text-base text-text mb-2">{t.plan.doneTitle}</h3>
                 <p className="text-sm text-text-muted mb-5">
                   {isDowngrade(modal.target)
-                    ? t.plan.doneDowngradeDesc.replace('{date}', expiresAt)
+                    ? t.plan.doneDowngradeDesc
+                        .replace('{plan}', planLabel(modal.target))
+                        .replace('{date}', expiresAt)
                     : t.plan.doneDesc.replace('{plan}', planLabel(modal.target))}
                 </p>
                 <button
