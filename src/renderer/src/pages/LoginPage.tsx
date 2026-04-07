@@ -29,12 +29,14 @@ function usePasswordChecks(password: string) {
 
 /* ── Validation indicator ── */
 
-function Check({ ok, label }: { ok: boolean; label: string }) {
+function Check({ ok, label, error }: { ok: boolean; label: string; error?: boolean }) {
   return (
     <span
-      className={`flex items-center gap-1 text-[11px] transition-colors ${ok ? 'text-green-500' : 'text-text-faint'}`}
+      className={`flex items-center gap-1 text-[11px] transition-colors ${
+        ok ? 'text-green-500' : error ? 'text-red-500' : 'text-text-faint'
+      }`}
     >
-      <span className="text-[10px]">{ok ? '\u2713' : '\u2022'}</span>
+      <span className="text-[10px]">{ok ? '\u2713' : error ? '\u2717' : '\u2022'}</span>
       {label}
     </span>
   )
@@ -437,7 +439,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                       <Check ok={true} label={t.login.validNameAvailable} />
                     )}
                     {nameFormatValid && !checkingUsername && usernameAvailable === false && (
-                      <Check ok={false} label={t.login.validNameTaken} />
+                      <Check ok={false} error label={t.login.validNameTaken} />
                     )}
                   </div>
                 )}

@@ -23,6 +23,8 @@ declare global {
         error?: string
       }>
       checkIpQuick: () => Promise<{ ok: boolean; ip: string | null }>
+      checkLocalIp: () => Promise<{ ok: boolean; ip: string | null }>
+      checkProxyIp: () => Promise<{ ok: boolean; ip: string | null }>
       detectSystemProxy: () => Promise<{ found: boolean; host?: string; port?: string }>
       auth: {
         signUp: (username: string, email: string, password: string) => Promise<AuthResponse>

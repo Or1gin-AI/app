@@ -1,46 +1,79 @@
 import { useState, useEffect } from 'react'
 import { useLocale } from '@/i18n/context'
 import { PiCheckCircleBold, PiWarningBold } from 'react-icons/pi'
+import { VscLoading } from 'react-icons/vsc'
 
 interface NetworkStatusPageProps {
-  networkOk: boolean
-  exitIp: string | null
   onBack: () => void
   onReconfigure: () => void
 }
 
-export function NetworkStatusPage({ networkOk, exitIp, onBack, onReconfigure }: NetworkStatusPageProps) {
+export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPageProps) {
   const { t } = useLocale()
-  const [sidecarRunning, setSidecarRunning] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [localIp, setLocalIp] = useState<string | null>(null)
+  const [proxyIp, setProxyIp] = useState<string | null>(null)
+  const [proxyOk, setProxyOk] = useState(false)
 
   useEffect(() => {
-    window.electronAPI.sidecar.status().then((s) => setSidecarRunning(s.running))
+    let cancelled = false
+
+    async function check() {
+      // Fetch local IP (direct to VPS) and proxy IP (curl through proxy) in parallel
+      const [directRes, proxyRes] = await Promise.all([
+        window.electronAPI.checkLocalIp(),
+        window.electronAPI.checkProxyIp()
+      ])
+
+      if (cancelled) return
+      setLocalIp(directRes.ip)
+      setProxyIp(proxyRes.ip)
+      setProxyOk(proxyRes.ok)
+      setLoading(false)
+    }
+
+    check()
+    return () => { cancelled = true }
   }, [])
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
+        <VscLoading size={24} className="text-brand animate-spin mb-4" />
+        <p className="text-[13px] text-text-muted">{t.network.detecting}</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
-      <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${networkOk ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-        {networkOk ? <PiCheckCircleBold size={24} className="text-green-500" /> : <PiWarningBold size={24} className="text-red-500" />}
+      <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${proxyOk ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+        {proxyOk ? <PiCheckCircleBold size={24} className="text-green-500" /> : <PiWarningBold size={24} className="text-red-500" />}
       </div>
 
       <h2 className="font-serif text-xl text-text mb-1.5">
-        {networkOk ? t.networkStatus.title : t.networkStatus.titleError}
+        {proxyOk ? t.networkStatus.title : t.networkStatus.titleError}
       </h2>
       <p className="text-[13px] text-text-muted mb-6 text-center">
-        {networkOk ? t.networkStatus.desc : t.networkStatus.descError}
+        {proxyOk ? t.networkStatus.desc : t.networkStatus.descError}
       </p>
 
       <div className="w-full max-w-[380px] bg-bg-card rounded-xl border border-border p-4 mb-6">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-[12px] font-mono">
-          <div>
-            <p className="text-text-faint text-[11px] mb-0.5">{t.networkStatus.proxyStatus}</p>
-            <p className={sidecarRunning ? 'text-green-600' : 'text-red-500'}>
-              {sidecarRunning ? t.networkStatus.running : t.networkStatus.stopped}
-            </p>
+        <div className="grid grid-cols-1 gap-y-3 text-[12px] font-mono">
+          <div className="flex items-center justify-between">
+            <span className="text-text-faint text-[11px]">{t.networkStatus.proxyStatus}</span>
+            <span className={proxyOk ? 'text-green-600' : 'text-red-500'}>
+              {proxyOk ? t.networkStatus.running : t.networkStatus.stopped}
+            </span>
           </div>
-          <div>
-            <p className="text-text-faint text-[11px] mb-0.5">{t.networkStatus.exitIp}</p>
-            <p className="text-text-secondary">{exitIp || '—'}</p>
+          <div className="border-t border-border" />
+          <div className="flex items-center justify-between">
+            <span className="text-text-faint text-[11px]">{t.networkStatus.localIp}</span>
+            <span className="text-text-secondary">{localIp || '—'}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-text-faint text-[11px]">{t.networkStatus.proxyIp}</span>
+            <span className={proxyOk ? 'text-green-600' : 'text-red-500'}>{proxyIp || '—'}</span>
           </div>
         </div>
       </div>
