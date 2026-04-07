@@ -4,6 +4,15 @@
   "description": "OriginAI Desktop Client",
   "main": "./out/main/index.js",
   "author": "OriginAI",
+  "build": {
+    "extraResources": [
+      {
+        "from": "resources/sidecar/${platform}-${arch}/",
+        "to": "sidecar/",
+        "filter": ["**/*"]
+      }
+    ]
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
