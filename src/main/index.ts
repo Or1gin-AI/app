@@ -9,6 +9,40 @@ import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePac
 
 const API_BASE = 'https://dev.originai.cc'
 
+// ── App settings (remember password, auto-login, auto-launch) ──
+
+interface AppSettings {
+  rememberPassword: boolean
+  autoLogin: boolean
+  autoLaunch: boolean
+  savedEmail: string
+  savedPassword: string
+}
+
+const DEFAULT_SETTINGS: AppSettings = {
+  rememberPassword: false,
+  autoLogin: false,
+  autoLaunch: false,
+  savedEmail: '',
+  savedPassword: '',
+}
+
+function getSettingsPath(): string {
+  return join(app.getPath('userData'), 'app-settings.json')
+}
+
+function loadSettings(): AppSettings {
+  try {
+    const p = getSettingsPath()
+    if (existsSync(p)) return { ...DEFAULT_SETTINGS, ...JSON.parse(readFileSync(p, 'utf-8')) }
+  } catch { /* ignore corrupt file */ }
+  return { ...DEFAULT_SETTINGS }
+}
+
+function saveSettings(settings: AppSettings): void {
+  writeFileSync(getSettingsPath(), JSON.stringify(settings))
+}
+
 // Persistent session storage
 function getSessionPath(): string {
   return join(app.getPath('userData'), 'session.json')
@@ -393,6 +427,15 @@ ipcMain.handle('sidecar:status', () => {
 
 ipcMain.handle('sidecar:verify', async () => {
   return verifySidecar()
+})
+
+// Settings IPC
+ipcMain.handle('settings:get', () => loadSettings())
+ipcMain.handle('settings:set', (_e, settings: AppSettings) => {
+  saveSettings(settings)
+  // Sync auto-launch with OS
+  app.setLoginItemSettings({ openAtLogin: settings.autoLaunch })
+  return { ok: true }
 })
 
 app.whenReady().then(() => {

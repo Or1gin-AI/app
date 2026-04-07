@@ -171,6 +171,26 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setDirty((p) => ({ ...p, [field]: true }))
   }
 
+  // Login options
+  const [rememberPassword, setRememberPassword] = useState(false)
+  const [autoLogin, setAutoLogin] = useState(false)
+  const [autoLaunch, setAutoLaunch] = useState(false)
+  const pendingAutoLogin = useRef(false)
+
+  // Load saved settings on mount
+  useEffect(() => {
+    window.electronAPI.settings.get().then((s) => {
+      setRememberPassword(s.rememberPassword)
+      setAutoLogin(s.autoLogin)
+      setAutoLaunch(s.autoLaunch)
+      if (s.rememberPassword && s.savedEmail) {
+        setEmail(s.savedEmail)
+        setPassword(s.savedPassword)
+        if (s.autoLogin) pendingAutoLogin.current = true
+      }
+    })
+  }, [])
+
   // UI state
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -227,8 +247,20 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
   /* ── Handlers ── */
 
-  const handleSignIn = async () => {
-    clearMessages()
+  const persistSettings = useCallback(
+    (rp: boolean, al: boolean, launch: boolean, em: string, pw: string) => {
+      window.electronAPI.settings.set({
+        rememberPassword: rp,
+        autoLogin: al,
+        autoLaunch: launch,
+        savedEmail: rp ? em : '',
+        savedPassword: rp ? pw : '',
+      })
+    },
+    [],
+  )
+
+  const doSignIn = async () => {
     if (!email || !password) {
       setError(t.login.errorFieldsRequired)
       return
@@ -237,6 +269,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       const res = await window.electronAPI.auth.signIn(email, password)
       if (res.status === 200) {
+        persistSettings(rememberPassword, autoLogin, autoLaunch, email, password)
         const data = res.data as { user?: { email: string; name: string } }
         onLogin({ email: data.user?.email ?? email, name: data.user?.name ?? '' })
       } else if (res.status === 403) {
@@ -252,6 +285,19 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       setLoading(false)
     }
   }
+
+  const handleSignIn = async () => {
+    clearMessages()
+    await doSignIn()
+  }
+
+  // Auto-login: trigger once after settings load populates credentials
+  useEffect(() => {
+    if (pendingAutoLogin.current && email && password && view === 'login') {
+      pendingAutoLogin.current = false
+      doSignIn()
+    }
+  }) // intentionally no deps — fires after state settles from settings load
 
   const handleSignUp = async () => {
     clearMessages()
@@ -373,7 +419,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 />
               </div>
 
-              <div className="mb-6">
+              <div className="mb-4">
                 <label className="block text-xs text-text-secondary mb-1.5 font-mono">{t.login.password}</label>
                 <input
                   type="password"
@@ -383,6 +429,34 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   className={inputCls()}
                   onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
                 />
+              </div>
+
+              {/* Login options */}
+              <div className="flex items-center justify-between mb-5 text-[12px] text-text-muted select-none">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rememberPassword}
+                    onChange={(e) => {
+                      setRememberPassword(e.target.checked)
+                      if (!e.target.checked) setAutoLogin(false)
+                    }}
+                    className="w-3.5 h-3.5 cursor-pointer appearance-none border border-border-strong rounded bg-bg-card checked:bg-brand checked:border-brand transition-colors relative checked:after:content-['✓'] checked:after:text-white checked:after:text-[10px] checked:after:absolute checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
+                  />
+                  {t.login.rememberPassword}
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoLogin}
+                    onChange={(e) => {
+                      setAutoLogin(e.target.checked)
+                      if (e.target.checked) setRememberPassword(true)
+                    }}
+                    className="w-3.5 h-3.5 cursor-pointer appearance-none border border-border-strong rounded bg-bg-card checked:bg-brand checked:border-brand transition-colors relative checked:after:content-['✓'] checked:after:text-white checked:after:text-[10px] checked:after:absolute checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
+                  />
+                  {t.login.autoLogin}
+                </label>
               </div>
 
               <button
@@ -557,8 +631,22 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </div>
         </div>
 
-        {/* Language Switcher — fixed outside scroll area */}
-        <div className="flex justify-end px-5 py-3 shrink-0">
+        {/* Bottom bar: auto-launch + language switcher */}
+        <div className="flex items-center justify-between px-5 py-3 shrink-0">
+          <label className="flex items-center gap-1.5 text-[12px] text-text-muted select-none cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoLaunch}
+              onChange={(e) => {
+                setAutoLaunch(e.target.checked)
+                window.electronAPI.settings.get().then((s) => {
+                  window.electronAPI.settings.set({ ...s, autoLaunch: e.target.checked })
+                })
+              }}
+              className="w-3.5 h-3.5 cursor-pointer appearance-none border border-border-strong rounded bg-bg-card checked:bg-brand checked:border-brand transition-colors relative checked:after:content-['✓'] checked:after:text-white checked:after:text-[10px] checked:after:absolute checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
+            />
+            {t.login.autoLaunch}
+          </label>
           <LanguageSwitcher />
         </div>
       </div>
