@@ -43,6 +43,19 @@ export const en = {
     rememberPassword: 'Remember password',
     autoLogin: 'Auto login',
     autoLaunch: 'Launch at startup',
+    // Forget password
+    forgetPassword: 'Forgot password?',
+    forgetNeedEmail: 'Please enter your email first',
+    forgetSent: 'Verification code sent to your email',
+    forgetFailed: 'Failed to send verification code, please try again',
+    // Reset password
+    resetTitle: 'Reset Password',
+    resetSubtitle: 'Enter the code sent to',
+    resetCode: 'Verification Code',
+    resetNewPassword: 'New Password',
+    resetSubmit: 'Reset Password',
+    resetSuccess: 'Password reset successfully! Please sign in',
+    resetFailed: 'Reset failed, check your code and try again',
     // Errors
     errorPasswordMismatch: 'Passwords do not match',
     errorFieldsRequired: 'Please fill in all fields',
@@ -109,9 +122,9 @@ export const en = {
       desc: 'Access Claude via browser or desktop app',
       descLine2: 'Full conversation experience',
       step1: 'Make sure this app is open and network optimization is active',
-      step2pre: 'Enter',
+      step2pre: 'Request login on web or desktop for',
       step2email: '{name}@teams.originai.cc',
-      step2post: 'on web or desktop and click login',
+      step2post: '',
       step3: 'Click the button below to request a login link',
       button: 'Request Login',
       modalTitle: 'Confirm',
@@ -121,6 +134,10 @@ export const en = {
       modalCancel: 'Cancel',
       modalConfirm: 'Continue',
       retryAfter: 'Retry in {time}',
+      requesting: 'Fetching login link...',
+      success: 'Login link opened in browser',
+      noEmail: 'No login email found. Make sure you requested login on claude.ai first.',
+      errorGeneric: 'Failed to fetch login link',
     },
     claudeCode: {
       label: 'CLAUDE CODE',
@@ -154,7 +171,11 @@ export const en = {
     email: 'Email',
     currentPlan: 'Current Plan',
     expiresAt: 'Expires',
-    balance: 'Balance',
+    // Activation
+    activationTitle: 'Activation Service',
+    activationRemaining: 'Remaining',
+    activationBuy: 'Purchase',
+    activationActivate: 'Activate Account',
     choosePlan: 'Choose a Plan',
     plans: {
       free: 'Free Plan',
@@ -164,29 +185,60 @@ export const en = {
     },
     free: 'Free',
     perMonth: '/ mo',
+    plusFeesBold: 'excl.',
+    plusFeesRest: ' other fees',
     current: 'Current',
     upgrade: 'Upgrade',
-    downgrade: 'Downgrade',
-    // Confirm
+    // Confirm upgrade
     confirmTitle: 'Confirm Purchase',
     confirmDesc: 'Subscribe to {plan} at {price}/mo?',
-    confirmDowngradeTitle: 'Confirm Downgrade',
-    confirmDowngradeDesc: 'Are you sure you want to downgrade to {plan}?',
     cancel: 'Cancel',
     confirm: 'Confirm',
     // Override
     overrideTitle: 'Override Current Plan',
     overrideDesc: 'Your {current} is still active. Override with {target}? Remaining time will be prorated.',
     confirmOverride: 'Confirm Override',
-    // Downgrade
-    downgradeTitle: 'Confirm Downgrade',
-    downgradeDesc: 'The downgrade to {plan} will take effect after your current plan expires on {date}.',
-    confirmDowngrade: 'Confirm Downgrade',
-    // Done
-    doneTitle: 'Success',
-    doneDesc: 'You have been switched to {plan}. Thank you!',
-    doneDowngradeDesc: 'Downgrade to {plan} scheduled. It will take effect after {date}.',
+    // Payment
+    paymentTitle: 'Choose Payment Method',
+    paymentDesc: 'Select your preferred payment channel',
+    payStripe: 'Lemon Squeezy (Stripe)',
+    payStripeDesc: 'Credit / debit card payments',
+    payCrypto: 'MoonPay (Web3)',
+    payCryptoDesc: 'Cryptocurrency payments',
+    // Waiting for payment
+    waitingTitle: 'Completing Payment',
+    waitingDesc: 'Please complete your payment in the checkout window. This dialog will close automatically.',
+    // Cancel subscription
+    cancelSubscription: 'Cancel',
+    cancelTitle: 'Cancel Subscription',
+    cancelDesc: 'Your {plan} will remain active until {date}. To cancel, please contact support@originai.cc or manage through your payment provider.',
+    // Error
+    errorTitle: 'Error',
+    checkoutError: 'Checkout failed, please try again',
     ok: 'OK',
+    // Order history
+    orderHistory: 'Order History',
+    noOrders: 'No orders yet',
+    orderDate: 'Date',
+    orderProduct: 'Product',
+    orderAmount: 'Amount',
+    orderProvider: 'Method',
+    orderStatus: 'Status',
+    productTypes: {
+      AI_ACTIVATION: 'AI Activation',
+      PRO: 'Pro Plan',
+      X5: '5x Plan',
+      X20: '20x Plan',
+    } as Record<string, string>,
+    orderStatuses: {
+      PENDING: 'Unpaid',
+      COMPLETED: 'Completed',
+      CANCELLED: 'Cancelled',
+      PAUSED: 'Paused',
+      REFUNDED: 'Refunded',
+    } as Record<string, string>,
+    // Disclaimer
+    disclaimer: 'All prices listed are monthly subscription prices. "Other fees" include our platform service fee and the payment processor\'s transaction fee, which vary by payment method. Conventional methods (credit/debit card) may be slightly more expensive. Please choose a plan and payment method that suits your needs. To switch payment methods, you must cancel your current plan and resubscribe.',
   },
   titlebar: {
     networkOk: 'Connected',

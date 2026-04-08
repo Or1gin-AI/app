@@ -5,7 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -178,7 +178,7 @@ function fetchExitIpDirect(): Promise<string | null> {
 function fetchExitIpViaProxy(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    execFile('curl', ['-s', '--max-time', '10', '-x', 'http://127.0.0.1:12345', 'https://icanhazip.com'],
+    execFile('curl', ['-4', '-s', '--max-time', '10', '-x', 'http://127.0.0.1:12345', 'https://icanhazip.com'],
       (err, stdout) => {
         if (err) { resolve(null); return }
         resolve(stdout.trim() || null)
@@ -232,15 +232,16 @@ ipcMain.handle('check-ip', async () => {
 
 // Quick IP ping (renderer can call this for lightweight checks)
 ipcMain.handle('check-ip-quick', async () => {
-  const ip = await fetchExitIp()
-  return { ok: ip !== null, ip }
+  const running = isSidecarRunning()
+  const ip = running ? await fetchExitIpViaProxy() : null
+  return { ok: running && ip !== null, ip }
 })
 
 // Local IP: curl icanhazip directly, no proxy
 ipcMain.handle('check-local-ip', async () => {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise<{ ok: boolean; ip: string | null }>((resolve) => {
-    execFile('curl', ['-s', '--max-time', '5', 'https://icanhazip.com'], (err, stdout) => {
+    execFile('curl', ['-4', '-s', '--max-time', '5', 'https://icanhazip.com'], (err, stdout) => {
       const ip = err ? null : stdout.trim() || null
       resolve({ ok: ip !== null, ip })
     })
@@ -262,8 +263,10 @@ function startHealthCheck(): void {
   healthRunning = true
   healthInterval = setInterval(async () => {
     if (!healthRunning) return
-    const ip = await fetchExitIp()
-    const ok = ip !== null
+    // Only OK if sidecar is running AND proxy exit IP is reachable
+    const running = isSidecarRunning()
+    const ip = running ? await fetchExitIpViaProxy() : null
+    const ok = running && ip !== null
     // Push to all renderer windows
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
@@ -357,16 +360,16 @@ ipcMain.handle('auth:restore-session', async () => {
   return { ok: false }
 })
 
-ipcMain.handle('auth:sign-up', async (_e, username: string, email: string, password: string) => {
-  return authFetch('POST', '/api/auth/sign-up/email', { name: username, username, email, password })
+ipcMain.handle('auth:sign-up', async (_e, username: string, email: string, password: string, turnstileToken?: string) => {
+  return authFetch('POST', '/api/auth/sign-up/email', { name: username, username, email, password, turnstileToken })
 })
 
 ipcMain.handle('auth:check-username', async (_e, username: string) => {
   return authFetch('GET', `/api/auth/is-username-available?username=${encodeURIComponent(username)}`)
 })
 
-ipcMain.handle('auth:sign-in', async (_e, email: string, password: string) => {
-  const res = await authFetch('POST', '/api/auth/sign-in/email', { email, password })
+ipcMain.handle('auth:sign-in', async (_e, email: string, password: string, turnstileToken?: string) => {
+  const res = await authFetch('POST', '/api/auth/sign-in/email', { email, password, turnstileToken })
   if (res.status === 200) {
     const data = res.data as { user?: { email: string; name: string } }
     if (data?.user) {
@@ -389,6 +392,14 @@ ipcMain.handle('auth:get-session', async () => {
   return authFetch('GET', '/api/auth/get-session')
 })
 
+ipcMain.handle('auth:reset-password', async (_e, email: string, otp: string, newPassword: string) => {
+  return authFetch('POST', '/api/auth/email-otp/reset-password', { email, otp, newPassword })
+})
+
+ipcMain.handle('auth:profile', async () => {
+  return authFetch('GET', '/api/auth/profile')
+})
+
 ipcMain.handle('auth:sign-out', async () => {
   const result = await authFetch('POST', '/api/auth/sign-out')
   sessionCookies = []
@@ -397,17 +408,91 @@ ipcMain.handle('auth:sign-out', async () => {
   return result
 })
 
+// Payment IPC handlers
+ipcMain.handle('payment:open-checkout', async (_e, url: string) => {
+  const parent = BrowserWindow.getAllWindows()[0]
+  const checkoutWin = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    resizable: true,
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+
+  checkoutWin.loadURL(url)
+  checkoutWin.once('ready-to-show', () => checkoutWin.show())
+
+  // After checkout page loads, close window if redirected to callback URL (payment done)
+  checkoutWin.webContents.once('did-finish-load', () => {
+    checkoutWin.webContents.on('did-navigate', (_event, navUrl) => {
+      const isCheckout =
+        navUrl.includes('lemonsqueezy.com') ||
+        navUrl.includes('stripe.com') ||
+        navUrl.includes('helio') ||
+        navUrl.includes('moonpay.com')
+      if (!isCheckout && !checkoutWin.isDestroyed()) {
+        checkoutWin.close()
+      }
+    })
+  })
+
+  checkoutWin.on('closed', () => {
+    if (parent && !parent.isDestroyed()) {
+      parent.webContents.send('payment:checkout-closed')
+    }
+  })
+
+  return { ok: true }
+})
+
+ipcMain.handle('payment:checkout', async (_e, productType: string, provider?: string, claudeAccountId?: string) => {
+  const body: Record<string, unknown> = { product_type: productType }
+  if (provider) body.provider = provider
+  if (claudeAccountId) body.claude_account_id = claudeAccountId
+  return authFetch('POST', '/api/payment/checkout', body)
+})
+
+ipcMain.handle('payment:orders', async (_e, page?: number, limit?: number) => {
+  const params = new URLSearchParams()
+  if (page) params.set('page', String(page))
+  if (limit) params.set('limit', String(limit))
+  const query = params.toString()
+  return authFetch('GET', `/api/payment/orders${query ? `?${query}` : ''}`)
+})
+
+// Claude Account IPC handlers
+ipcMain.handle('claude-account:create', async () => {
+  return authFetch('POST', '/api/claude-account/create')
+})
+
+ipcMain.handle('claude-account:list', async () => {
+  return authFetch('GET', '/api/claude-account/list')
+})
+
+ipcMain.handle('claude-account:listen-email', async (_e, email?: string) => {
+  const res = await authFetch('POST', '/api/claude-account/listen-email', email ? { email } : {})
+  console.log('[listen-email] status:', res.status, 'data:', JSON.stringify(res.data, null, 2))
+  return res
+})
+
 // Sidecar IPC handlers
 ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   const result = await startSidecar(preProxy)
   if (result.ok) {
-
     const pac = generatePacScript()
     for (const win of BrowserWindow.getAllWindows()) {
       await win.webContents.session.setProxy({
         pacScript: `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`
       })
     }
+    // Set system proxy so browsers also use the PAC
+    await setSystemProxy().catch(() => { /* non-fatal */ })
+    // Set shell env so terminal tools (claude CLI etc.) also use the proxy
+    setShellProxy()
   }
   return result
 })
@@ -418,6 +503,8 @@ ipcMain.handle('sidecar:stop', async () => {
   for (const win of BrowserWindow.getAllWindows()) {
     await win.webContents.session.setProxy({ mode: 'direct' })
   }
+  // Clear system proxy + shell env
+  await clearSystemProxy().catch(() => { /* non-fatal */ })
   return { ok: true }
 })
 
@@ -439,6 +526,9 @@ ipcMain.handle('settings:set', (_e, settings: AppSettings) => {
 })
 
 app.whenReady().then(() => {
+  // Clean up any sing-box left by a previous crash
+  killOrphanedSidecar()
+
   electronApp.setAppUserModelId('com.originai.app')
 
   app.on('browser-window-created', (_, window) => {
@@ -482,5 +572,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
+  await clearSystemProxy().catch(() => {})
   await stopSidecar()
 })

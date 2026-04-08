@@ -3,7 +3,26 @@ import { useLocale } from '@/i18n/context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import logoImg from '@/assets/icon-transparent.png'
 
-type AuthView = 'login' | 'register' | 'otp'
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (container: HTMLElement, options: {
+        sitekey: string
+        callback: (token: string) => void
+        'expired-callback'?: () => void
+        'error-callback'?: () => void
+        theme?: 'light' | 'dark' | 'auto'
+        size?: 'normal' | 'compact'
+      }) => string
+      reset: (widgetId: string) => void
+      remove: (widgetId: string) => void
+    }
+  }
+}
+
+const TURNSTILE_SITE_KEY = '0x4AAAAAAC2Lw36H3wTiNN0w'
+
+type AuthView = 'login' | 'register' | 'otp' | 'reset'
 
 interface LoginPageProps {
   onLogin: (user: { email: string; name: string }) => void
@@ -149,6 +168,45 @@ function OtpInput({
   )
 }
 
+/* ── Turnstile widget ── */
+
+function Turnstile({ onToken }: { onToken: (token: string | null) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const widgetIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const mount = () => {
+      if (!containerRef.current || !window.turnstile || widgetIdRef.current) return
+      widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token) => onToken(token),
+        'expired-callback': () => onToken(null),
+        'error-callback': () => onToken(null),
+        theme: 'light',
+      })
+    }
+
+    // turnstile script might not be loaded yet
+    if (window.turnstile) {
+      mount()
+    } else {
+      const interval = setInterval(() => {
+        if (window.turnstile) { clearInterval(interval); mount() }
+      }, 200)
+      return () => clearInterval(interval)
+    }
+
+    return () => {
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(widgetIdRef.current)
+        widgetIdRef.current = null
+      }
+    }
+  }, [onToken])
+
+  return <div ref={containerRef} className="flex justify-center mb-4" />
+}
+
 /* ── Main component ── */
 
 export function LoginPage({ onLogin }: LoginPageProps) {
@@ -161,6 +219,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [name, setName] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [otp, setOtp] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
 
   // Track which fields are focused (show hints) vs blurred-dirty (show red border only)
   const [focused, setFocused] = useState<Record<string, boolean>>({})
@@ -191,6 +251,10 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     })
   }, [])
 
+  // Turnstile
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
+  const handleTurnstileToken = useCallback((token: string | null) => setTurnstileToken(token), [])
+
   // UI state
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -198,6 +262,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
   const pwdChecks = usePasswordChecks(password)
   const allPwdOk = pwdChecks.length && pwdChecks.upper && pwdChecks.lower && pwdChecks.number && pwdChecks.special
+
+  const newPwdChecks = usePasswordChecks(newPassword)
+  const allNewPwdOk = newPwdChecks.length && newPwdChecks.upper && newPwdChecks.lower && newPwdChecks.number && newPwdChecks.special
+  const newConfirmMatch = confirmNewPassword.length > 0 && newPassword === confirmNewPassword
+  const resetReady = otp.replace(/[^0-9]/g, '').length === 6 && allNewPwdOk && newConfirmMatch
 
   // Username availability check (debounced)
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
@@ -260,14 +329,14 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     [],
   )
 
-  const doSignIn = async () => {
+  const doSignIn = async (token?: string) => {
     if (!email || !password) {
       setError(t.login.errorFieldsRequired)
       return
     }
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.signIn(email, password)
+      const res = await window.electronAPI.auth.signIn(email, password, token)
       if (res.status === 200) {
         persistSettings(rememberPassword, autoLogin, autoLaunch, email, password)
         const data = res.data as { user?: { email: string; name: string } }
@@ -288,7 +357,53 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
   const handleSignIn = async () => {
     clearMessages()
-    await doSignIn()
+    await doSignIn(turnstileToken || undefined)
+  }
+
+  const handleForgetPassword = async () => {
+    clearMessages()
+    if (!email || !EMAIL_RE.test(email)) {
+      setError(t.login.forgetNeedEmail)
+      return
+    }
+    setLoading(true)
+    try {
+      await window.electronAPI.auth.sendOtp(email, 'forget-password')
+      setMessage(t.login.forgetSent)
+      setOtp('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+      setView('reset')
+    } catch {
+      setError(t.login.forgetFailed)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResetPassword = async () => {
+    clearMessages()
+    const code = otp.replace(/[^0-9]/g, '')
+    if (code.length !== 6) return
+    if (!newPassword || newPassword !== confirmNewPassword) {
+      setError(t.login.errorPasswordMismatch)
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await window.electronAPI.auth.resetPassword(email, code, newPassword)
+      if (res.status === 200) {
+        setMessage(t.login.resetSuccess)
+        setPassword(newPassword)
+        setView('login')
+      } else {
+        setError(t.login.resetFailed)
+      }
+    } catch {
+      setError(t.login.resetFailed)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Auto-login: trigger once after settings load populates credentials
@@ -304,7 +419,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     if (!registerReady) return
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.signUp(name, email, password)
+      const res = await window.electronAPI.auth.signUp(name, email, password, turnstileToken || undefined)
       if (res.status === 200) {
         await window.electronAPI.auth.sendOtp(email, 'email-verification')
         setMessage(t.login.registerSuccess)
@@ -358,6 +473,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     clearMessages()
     setFocused({})
     setDirty({})
+    setTurnstileToken(null)
     setView('register')
   }
 
@@ -365,6 +481,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     clearMessages()
     setFocused({})
     setDirty({})
+    setTurnstileToken(null)
     setView('login')
   }
 
@@ -420,7 +537,15 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </div>
 
               <div className="mb-4">
-                <label className="block text-xs text-text-secondary mb-1.5 font-mono">{t.login.password}</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-text-secondary font-mono">{t.login.password}</label>
+                  <button
+                    onClick={handleForgetPassword}
+                    className="text-[11px] text-text-faint hover:text-text-muted cursor-pointer bg-transparent border-none transition-colors"
+                  >
+                    {t.login.forgetPassword}
+                  </button>
+                </div>
                 <input
                   type="password"
                   value={password}
@@ -459,10 +584,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 </label>
               </div>
 
+              <Turnstile onToken={handleTurnstileToken} />
+
               <button
                 onClick={handleSignIn}
-                disabled={loading}
-                className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50"
+                disabled={loading || !turnstileToken}
+                className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? '...' : t.login.submit}
               </button>
@@ -571,9 +698,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 />
               </div>
 
+              <Turnstile onToken={handleTurnstileToken} />
+
               <button
                 onClick={handleSignUp}
-                disabled={loading || !registerReady}
+                disabled={loading || !registerReady || !turnstileToken}
                 className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? '...' : t.login.registerSubmit}
@@ -626,6 +755,76 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   {t.login.otpResend}
                 </button>
               </div>
+            </>
+          )}
+
+          {/* ===== RESET PASSWORD ===== */}
+          {view === 'reset' && (
+            <>
+              <h2 className="font-serif text-xl text-text mb-1.5">{t.login.resetTitle}</h2>
+              <p className="text-[13px] text-text-muted mb-7">
+                {t.login.resetSubtitle} <span className="text-brand">{email}</span>
+              </p>
+
+              <div className="mb-4">
+                <label className="block text-xs text-text-secondary mb-1.5 font-mono">{t.login.resetCode}</label>
+                <OtpInput value={otp} onChange={setOtp} onComplete={() => {}} />
+              </div>
+
+              <div className="mb-3">
+                <label className="block text-xs text-text-secondary mb-1.5 font-mono">{t.login.resetNewPassword}</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  onFocus={() => focus('newPwd')}
+                  onBlur={() => blur('newPwd')}
+                  placeholder="••••••••"
+                  className={inputCls(dirty.newPwd && !allNewPwdOk && newPassword.length > 0)}
+                />
+                {focused.newPwd && newPassword.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                    <Check ok={newPwdChecks.length} label={t.login.validPwdLength} />
+                    <Check ok={newPwdChecks.upper} label={t.login.validPwdUpper} />
+                    <Check ok={newPwdChecks.lower} label={t.login.validPwdLower} />
+                    <Check ok={newPwdChecks.number} label={t.login.validPwdNumber} />
+                    <Check ok={newPwdChecks.special} label={t.login.validPwdSpecial} />
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-5">
+                <label className="block text-xs text-text-secondary mb-1.5 font-mono">{t.login.confirmPassword}</label>
+                <input
+                  type="password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  onBlur={() => blur('newConfirm')}
+                  placeholder="••••••••"
+                  className={inputCls(dirty.newConfirm && !newConfirmMatch && confirmNewPassword.length > 0)}
+                  onKeyDown={(e) => e.key === 'Enter' && resetReady && handleResetPassword()}
+                />
+                {confirmNewPassword.length > 0 && (
+                  <div className="mt-1.5">
+                    <Check ok={newConfirmMatch} label={t.login.validPwdMatch} error={!newConfirmMatch && dirty.newConfirm} />
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleResetPassword}
+                disabled={loading || !resetReady}
+                className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? '...' : t.login.resetSubmit}
+              </button>
+
+              <button
+                onClick={switchToLogin}
+                className="w-full text-center text-[13px] text-text-muted hover:text-text-secondary cursor-pointer bg-transparent border-none"
+              >
+                {t.login.backToLogin}
+              </button>
             </>
           )}
           </div>

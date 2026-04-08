@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { spawn, ChildProcess } from 'child_process'
-import { writeFileSync, mkdirSync, existsSync } from 'fs'
+import { homedir } from 'os'
+import { spawn, ChildProcess, execFile } from 'child_process'
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
 import http from 'node:http'
 
 const LOCAL_PORT = 12345
@@ -86,9 +87,14 @@ function generateConfig(preProxyHost?: string, preProxyPort?: number): object {
         {
           domain_suffix: ['.claude.ai', '.anthropic.com'],
           outbound: 'proxy-out'
+        },
+        {
+          // IP check services — needed for proxy verification only
+          domain: ['icanhazip.com', 'ipv4.icanhazip.com', 'ipinfo.io', 'api.ipify.org'],
+          outbound: 'proxy-out'
         }
       ],
-      final: 'proxy-out'
+      final: 'direct'
     }
   }
 }
@@ -96,6 +102,9 @@ function generateConfig(preProxyHost?: string, preProxyPort?: number): object {
 export function generatePacScript(): string {
   return `function FindProxyForURL(url, host) {
   if (shExpMatch(host, "*.claude.ai") || shExpMatch(host, "*.anthropic.com") || shExpMatch(host, "claude.ai") || shExpMatch(host, "anthropic.com")) {
+    return "PROXY 127.0.0.1:${LOCAL_PORT}";
+  }
+  if (host === "icanhazip.com" || host === "ipv4.icanhazip.com" || host === "ipinfo.io" || host === "api.ipify.org") {
     return "PROXY 127.0.0.1:${LOCAL_PORT}";
   }
   return "DIRECT";
@@ -251,6 +260,159 @@ export function isSidecarRunning(): boolean {
   return sidecarProcess !== null && !sidecarProcess.killed
 }
 
+/** Kill any orphaned sing-box processes left from a previous crash */
+export function killOrphanedSidecar(): void {
+  try {
+    if (process.platform === 'win32') {
+      execFile('taskkill', ['/F', '/IM', 'sing-box.exe'], () => {})
+    } else {
+      execFile('pkill', ['-f', 'sing-box'], () => {})
+    }
+  } catch { /* best effort */ }
+}
+
 export function getLocalPort(): number {
   return LOCAL_PORT
+}
+
+// ── System proxy management ──
+
+function getPacFilePath(): string {
+  return join(getConfigDir(), 'proxy.pac')
+}
+
+function run(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, (err) => (err ? reject(err) : resolve()))
+  })
+}
+
+/** Get all network service names (macOS) */
+async function getMacNetworkServices(): Promise<string[]> {
+  return new Promise((resolve) => {
+    execFile('networksetup', ['-listallnetworkservices'], (err, stdout) => {
+      if (err) { resolve(['Wi-Fi', 'Ethernet']); return }
+      const services = stdout
+        .split('\n')
+        .slice(1) // skip header line
+        .map((s) => s.trim())
+        .filter((s) => s && !s.startsWith('*'))
+      resolve(services.length > 0 ? services : ['Wi-Fi', 'Ethernet'])
+    })
+  })
+}
+
+export async function setSystemProxy(): Promise<void> {
+  const pacContent = generatePacScript()
+  const pacPath = getPacFilePath()
+  writeFileSync(pacPath, pacContent)
+
+  if (process.platform === 'darwin') {
+    const pacUrl = `file://${pacPath}`
+    const services = await getMacNetworkServices()
+    for (const svc of services) {
+      try {
+        await run('networksetup', ['-setautoproxyurl', svc, pacUrl])
+        await run('networksetup', ['-setautoproxystate', svc, 'on'])
+      } catch { /* service may not support proxy, skip */ }
+    }
+  } else if (process.platform === 'win32') {
+    const pacUrl = `file:///${pacPath.replace(/\\/g, '/')}`
+    await run('reg', [
+      'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', pacUrl, '/f'
+    ])
+  }
+}
+
+export async function clearSystemProxy(): Promise<void> {
+  if (process.platform === 'darwin') {
+    const services = await getMacNetworkServices()
+    for (const svc of services) {
+      try {
+        await run('networksetup', ['-setautoproxystate', svc, 'off'])
+      } catch { /* skip */ }
+    }
+  } else if (process.platform === 'win32') {
+    await run('reg', [
+      'delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v', 'AutoConfigURL', '/f'
+    ]).catch(() => { /* key may not exist */ })
+  }
+  // Also clean terminal env
+  clearShellProxy()
+}
+
+// ── Terminal proxy via shell env ──
+
+const PROXY_URL = `http://127.0.0.1:${LOCAL_PORT}`
+const MARKER = '# >>> OriginAI Proxy >>>'
+const MARKER_END = '# <<< OriginAI Proxy <<<'
+const PROXY_SNIPPET = `${MARKER}
+export http_proxy="${PROXY_URL}"
+export https_proxy="${PROXY_URL}"
+export HTTP_PROXY="${PROXY_URL}"
+export HTTPS_PROXY="${PROXY_URL}"
+${MARKER_END}`
+
+function getShellProfiles(): string[] {
+  const home = homedir()
+  if (process.platform === 'darwin') {
+    // .zshenv is sourced by ALL zsh instances (interactive + non-interactive)
+    return [join(home, '.zshenv')]
+  } else if (process.platform === 'win32') {
+    return [] // Windows terminal uses system env vars, handled separately
+  }
+  return [join(home, '.bashrc')]
+}
+
+export function setShellProxy(): void {
+  if (process.platform === 'win32') {
+    // Set user-level env vars on Windows
+    try {
+      execFile('setx', ['http_proxy', PROXY_URL], () => {})
+      execFile('setx', ['https_proxy', PROXY_URL], () => {})
+      execFile('setx', ['HTTP_PROXY', PROXY_URL], () => {})
+      execFile('setx', ['HTTPS_PROXY', PROXY_URL], () => {})
+    } catch { /* */ }
+    return
+  }
+
+  for (const profile of getShellProfiles()) {
+    try {
+      let content = ''
+      if (existsSync(profile)) {
+        content = readFileSync(profile, 'utf-8')
+      }
+      // Remove old snippet if present
+      const re = new RegExp(`\\n?${MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g')
+      content = content.replace(re, '\n')
+      // Append new snippet
+      content = content.trimEnd() + '\n' + PROXY_SNIPPET + '\n'
+      writeFileSync(profile, content)
+    } catch { /* skip if no permission */ }
+  }
+}
+
+export function clearShellProxy(): void {
+  if (process.platform === 'win32') {
+    // Remove user-level env vars on Windows (set to empty)
+    try {
+      execFile('setx', ['http_proxy', ''], () => {})
+      execFile('setx', ['https_proxy', ''], () => {})
+      execFile('setx', ['HTTP_PROXY', ''], () => {})
+      execFile('setx', ['HTTPS_PROXY', ''], () => {})
+    } catch { /* */ }
+    return
+  }
+
+  for (const profile of getShellProfiles()) {
+    try {
+      if (!existsSync(profile)) continue
+      let content = readFileSync(profile, 'utf-8')
+      const re = new RegExp(`\\n?${MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g')
+      content = content.replace(re, '\n')
+      writeFileSync(profile, content)
+    } catch { /* skip */ }
+  }
 }
