@@ -8,19 +8,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkProxyIp: () => ipcRenderer.invoke('check-proxy-ip'),
   detectSystemProxy: () => ipcRenderer.invoke('detect-system-proxy'),
   auth: {
-    signUp: (username: string, email: string, password: string) =>
-      ipcRenderer.invoke('auth:sign-up', username, email, password),
+    signUp: (username: string, email: string, password: string, turnstileToken?: string) =>
+      ipcRenderer.invoke('auth:sign-up', username, email, password, turnstileToken),
     checkUsername: (username: string) =>
       ipcRenderer.invoke('auth:check-username', username),
-    signIn: (email: string, password: string) =>
-      ipcRenderer.invoke('auth:sign-in', email, password),
+    signIn: (email: string, password: string, turnstileToken?: string) =>
+      ipcRenderer.invoke('auth:sign-in', email, password, turnstileToken),
     sendOtp: (email: string, type: string) =>
       ipcRenderer.invoke('auth:send-otp', email, type),
     verifyEmail: (email: string, otp: string) =>
       ipcRenderer.invoke('auth:verify-email', email, otp),
     getSession: () => ipcRenderer.invoke('auth:get-session'),
+    resetPassword: (email: string, otp: string, newPassword: string) =>
+      ipcRenderer.invoke('auth:reset-password', email, otp, newPassword),
+    profile: () => ipcRenderer.invoke('auth:profile'),
     signOut: () => ipcRenderer.invoke('auth:sign-out'),
     restoreSession: () => ipcRenderer.invoke('auth:restore-session')
+  },
+  payment: {
+    checkout: (productType: string, provider?: string, claudeAccountId?: string) =>
+      ipcRenderer.invoke('payment:checkout', productType, provider, claudeAccountId),
+    openCheckout: (url: string) => ipcRenderer.invoke('payment:open-checkout', url),
+    onCheckoutClosed: (cb: () => void) => {
+      const handler = () => cb()
+      ipcRenderer.on('payment:checkout-closed', handler)
+      return () => ipcRenderer.removeListener('payment:checkout-closed', handler)
+    },
+    orders: (page?: number, limit?: number) =>
+      ipcRenderer.invoke('payment:orders', page, limit),
+  },
+  claudeAccount: {
+    create: () => ipcRenderer.invoke('claude-account:create'),
+    list: () => ipcRenderer.invoke('claude-account:list'),
+    listenEmail: (email?: string) => ipcRenderer.invoke('claude-account:listen-email', email),
   },
   sidecar: {
     start: (preProxy?: string) => ipcRenderer.invoke('sidecar:start', preProxy),

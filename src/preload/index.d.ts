@@ -27,12 +27,14 @@ declare global {
       checkProxyIp: () => Promise<{ ok: boolean; ip: string | null }>
       detectSystemProxy: () => Promise<{ found: boolean; host?: string; port?: string }>
       auth: {
-        signUp: (username: string, email: string, password: string) => Promise<AuthResponse>
+        signUp: (username: string, email: string, password: string, turnstileToken?: string) => Promise<AuthResponse>
         checkUsername: (username: string) => Promise<AuthResponse>
-        signIn: (email: string, password: string) => Promise<AuthResponse>
+        signIn: (email: string, password: string, turnstileToken?: string) => Promise<AuthResponse>
         sendOtp: (email: string, type: string) => Promise<AuthResponse>
         verifyEmail: (email: string, otp: string) => Promise<AuthResponse>
         getSession: () => Promise<AuthResponse>
+        resetPassword: (email: string, otp: string, newPassword: string) => Promise<AuthResponse>
+        profile: () => Promise<AuthResponse>
         signOut: () => Promise<AuthResponse>
         restoreSession: () => Promise<{ ok: boolean; user?: { email: string; name: string } }>
       }
@@ -51,6 +53,17 @@ declare global {
           savedEmail: string
           savedPassword: string
         }) => Promise<{ ok: boolean }>
+      }
+      payment: {
+        checkout: (productType: string, provider?: string, claudeAccountId?: string) => Promise<AuthResponse>
+        openCheckout: (url: string) => Promise<{ ok: boolean }>
+        onCheckoutClosed: (cb: () => void) => () => void
+        orders: (page?: number, limit?: number) => Promise<AuthResponse>
+      }
+      claudeAccount: {
+        create: () => Promise<AuthResponse>
+        list: () => Promise<AuthResponse>
+        listenEmail: (email?: string) => Promise<AuthResponse>
       }
       sidecar: {
         start: (preProxy?: string) => Promise<{ ok: boolean; error?: string }>

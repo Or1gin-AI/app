@@ -56,7 +56,12 @@ export function Titlebar({
 
   const account = showAccount && (
     <div className="flex items-center gap-2.5 text-text-secondary text-[11px] font-mono">
-      <span>{userEmail || 'user@example.com'}</span>
+      <button
+        onClick={onPlanClick}
+        className="hover:underline cursor-pointer bg-transparent border-none text-[11px] font-mono text-text-secondary"
+      >
+        {userEmail || 'user@example.com'}
+      </button>
       <span className="text-text-faint">·</span>
       <button
         onClick={onPlanClick}

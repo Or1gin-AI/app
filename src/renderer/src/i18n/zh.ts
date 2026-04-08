@@ -43,6 +43,19 @@ export const zh = {
     rememberPassword: '记住密码',
     autoLogin: '自动登录',
     autoLaunch: '开机自启',
+    // Forget password
+    forgetPassword: '忘记密码？',
+    forgetNeedEmail: '请先输入邮箱',
+    forgetSent: '验证码已发送至您的邮箱',
+    forgetFailed: '发送失败，请重试',
+    // Reset password
+    resetTitle: '重置密码',
+    resetSubtitle: '请输入发送至以下邮箱的验证码',
+    resetCode: '验证码',
+    resetNewPassword: '新密码',
+    resetSubmit: '重置密码',
+    resetSuccess: '密码重置成功！请重新登录',
+    resetFailed: '重置失败，请检查验证码后重试',
     // Errors
     errorPasswordMismatch: '两次输入的密码不一致',
     errorFieldsRequired: '请填写所有字段',
@@ -109,9 +122,9 @@ export const zh = {
       desc: '使用浏览器或桌面端访问 Claude',
       descLine2: '完整的对话体验',
       step1: '确保已打开本软件并且网络优化正常',
-      step2pre: '在网页版或桌面版输入',
+      step2pre: '在网页版或桌面版请求登录',
       step2email: '{name}@teams.originai.cc',
-      step2post: '并点击登录',
+      step2post: '',
       step3: '点击下方按钮获取登录链接',
       button: '请求登录',
       modalTitle: '确认',
@@ -121,6 +134,10 @@ export const zh = {
       modalCancel: '取消',
       modalConfirm: '继续',
       retryAfter: '{time} 后可重试',
+      requesting: '正在获取登录链接...',
+      success: '登录链接已在浏览器中打开',
+      noEmail: '未找到登录邮件，请确保已在 claude.ai 上请求登录',
+      errorGeneric: '获取登录链接失败',
     },
     claudeCode: {
       label: 'CLAUDE CODE',
@@ -154,7 +171,11 @@ export const zh = {
     email: '邮箱',
     currentPlan: '当前套餐',
     expiresAt: '到期时间',
-    balance: '账户余额',
+    // Activation
+    activationTitle: '激活服务',
+    activationRemaining: '剩余次数',
+    activationBuy: '购买',
+    activationActivate: '激活账号',
     choosePlan: '选择套餐',
     plans: {
       free: 'Free Plan',
@@ -164,29 +185,60 @@ export const zh = {
     },
     free: '免费',
     perMonth: '/ 月',
+    plusFeesBold: '不含',
+    plusFeesRest: '其他费用',
     current: '当前套餐',
     upgrade: '升级',
-    downgrade: '降级',
-    // Confirm
+    // Confirm upgrade
     confirmTitle: '确认购买',
     confirmDesc: '确定要购买 {plan}（{price}/月）吗？',
-    confirmDowngradeTitle: '确认降级',
-    confirmDowngradeDesc: '确定要降级到 {plan} 吗？',
     cancel: '取消',
     confirm: '确认',
     // Override
     overrideTitle: '覆盖当前套餐',
     overrideDesc: '你当前的 {current} 尚未到期，确定要覆盖为 {target} 吗？剩余时长将按比例折算。',
     confirmOverride: '确认覆盖',
-    // Downgrade
-    downgradeTitle: '确认降级',
-    downgradeDesc: '降级将在当前套餐到期（{date}）后生效，届时自动切换为 {plan}。',
-    confirmDowngrade: '确认降级',
-    // Done
-    doneTitle: '操作成功',
-    doneDesc: '已成功切换到 {plan}，感谢您的支持！',
-    doneDowngradeDesc: '降级已安排，将在 {date} 到期后自动切换为 {plan}。',
+    // Payment
+    paymentTitle: '选择支付方式',
+    paymentDesc: '请选择您偏好的支付渠道',
+    payStripe: 'Lemon Squeezy (Stripe)',
+    payStripeDesc: '信用卡 / 借记卡等常规支付',
+    payCrypto: 'MoonPay (Web3)',
+    payCryptoDesc: '加密货币支付',
+    // Waiting for payment
+    waitingTitle: '等待支付',
+    waitingDesc: '请在弹出的窗口中完成支付，完成后此对话框将自动关闭。',
+    // Cancel subscription
+    cancelSubscription: '取消订阅',
+    cancelTitle: '取消订阅',
+    cancelDesc: '您的 {plan} 将保持有效直至 {date}。如需取消，请联系 support@originai.cc 或通过支付平台管理您的订阅。',
+    // Error
+    errorTitle: '错误',
+    checkoutError: '结账失败，请重试',
     ok: '好的',
+    // Order history
+    orderHistory: '交易记录',
+    noOrders: '暂无交易记录',
+    orderDate: '日期',
+    orderProduct: '商品',
+    orderAmount: '金额',
+    orderProvider: '方式',
+    orderStatus: '状态',
+    productTypes: {
+      AI_ACTIVATION: 'AI 激活',
+      PRO: 'Pro 套餐',
+      X5: '5x 套餐',
+      X20: '20x 套餐',
+    } as Record<string, string>,
+    orderStatuses: {
+      PENDING: '未支付',
+      COMPLETED: '已完成',
+      CANCELLED: '已取消',
+      PAUSED: '已暂停',
+      REFUNDED: '已退款',
+    } as Record<string, string>,
+    // Disclaimer
+    disclaimer: '所有标价均为月度订阅的价格。「其他费用」包含平台服务费及支付平台手续费，因支付方式不同而异。常规支付方式（信用卡/借记卡）价格可能稍贵。请您根据自身需求选择合适的套餐与支付方式。如需切换支付方式，须先取消当前订阅后重新开始，敬请理解。',
   },
   titlebar: {
     networkOk: '网络正常',
