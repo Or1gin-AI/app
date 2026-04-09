@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, nativeImage, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
@@ -141,6 +142,15 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Disable DevTools in production
+  if (!is.dev) {
+    mainWindow.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) {
+        _e.preventDefault()
+      }
+    })
+  }
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -150,27 +160,14 @@ function createWindow(): void {
 
 // --- IP detection helpers ---
 
-/** Direct IP fetch via SNI spoofing to VPS — used when sidecar is NOT running */
+/** Direct IP fetch (no proxy) — used for initial network detection */
 function fetchExitIpDirect(): Promise<string | null> {
+  const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    const req = http.request(
-      {
-        hostname: '13.113.99.64',
-        port: 80,
-        path: '/ip',
-        method: 'GET',
-        headers: { Host: 'anthropic.com' },
-        timeout: 10000
-      },
-      (res) => {
-        let body = ''
-        res.on('data', (chunk) => (body += chunk))
-        res.on('end', () => resolve(body.trim() || null))
-      }
-    )
-    req.on('error', () => resolve(null))
-    req.on('timeout', () => { req.destroy(); resolve(null) })
-    req.end()
+    execFile('curl', ['-4', '-s', '--max-time', '10', 'https://icanhazip.com'], (err, stdout) => {
+      if (err) { resolve(null); return }
+      resolve(stdout.trim() || null)
+    })
   })
 }
 
@@ -178,7 +175,7 @@ function fetchExitIpDirect(): Promise<string | null> {
 function fetchExitIpViaProxy(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    execFile('curl', ['-4', '-s', '--max-time', '10', '-x', 'http://127.0.0.1:12345', 'https://icanhazip.com'],
+    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:8080`, 'https://icanhazip.com'],
       (err, stdout) => {
         if (err) { resolve(null); return }
         resolve(stdout.trim() || null)
@@ -397,7 +394,9 @@ ipcMain.handle('auth:reset-password', async (_e, email: string, otp: string, new
 })
 
 ipcMain.handle('auth:profile', async () => {
-  return authFetch('GET', '/api/auth/profile')
+  const res = await authFetch('GET', '/api/auth/profile')
+  console.log('[auth:profile] status:', res.status, 'data:', JSON.stringify(res.data, null, 2))
+  return res
 })
 
 ipcMain.handle('auth:sign-out', async () => {
@@ -406,6 +405,32 @@ ipcMain.handle('auth:sign-out', async () => {
   sessionUser = undefined
   clearSession()
   return result
+})
+
+// Proxy auth IPC handler
+ipcMain.handle('proxy-auth:login', async () => {
+  return authFetch('GET', '/api/proxy-auth/login')
+})
+
+// SMS activation IPC handlers
+ipcMain.handle('sms:request-number', async () => {
+  return authFetch('POST', '/api/sms/request-number')
+})
+
+ipcMain.handle('sms:phone-number', async () => {
+  return authFetch('GET', '/api/sms/phone-number')
+})
+
+ipcMain.handle('sms:status', async () => {
+  return authFetch('GET', '/api/sms/status')
+})
+
+ipcMain.handle('sms:refresh-number', async () => {
+  return authFetch('POST', '/api/sms/refresh-number')
+})
+
+ipcMain.handle('sms:refund', async () => {
+  return authFetch('POST', '/api/sms/refund')
 })
 
 // Payment IPC handlers
@@ -480,8 +505,80 @@ ipcMain.handle('claude-account:listen-email', async (_e, email?: string) => {
 })
 
 // Sidecar IPC handlers
+// Track proxy credentials for auto-refresh
+let proxyCredentials: { username: string; password: string; expireAt: string } | null = null
+let proxyRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleProxyRefresh(): void {
+  if (proxyRefreshTimer) clearTimeout(proxyRefreshTimer)
+  if (!proxyCredentials) return
+
+  const expireMs = new Date(proxyCredentials.expireAt).getTime() - Date.now()
+  // Refresh 30 minutes before expiry
+  const refreshIn = Math.max(expireMs - 30 * 60 * 1000, 60_000)
+
+  proxyRefreshTimer = setTimeout(async () => {
+    try {
+      const res = await authFetch('GET', '/api/proxy-auth/login')
+      if (res.status === 200) {
+        const data = res.data as { username: string; password: string; expireAt: string }
+        proxyCredentials = data
+        console.log('[proxy-auth] credentials refreshed, new expiry:', data.expireAt)
+
+        // Restart xray with new credentials if running
+        if (isSidecarRunning()) {
+          // Read current config to determine preProxy
+          const configDir = join(app.getPath('userData'), 'xray')
+          const configPath = join(configDir, 'config.json')
+          let preProxy: string | undefined
+          try {
+            const cfg = JSON.parse(readFileSync(configPath, 'utf-8'))
+            const preProxyOut = cfg.outbounds?.find((o: { tag: string }) => o.tag === 'pre-proxy')
+            if (preProxyOut) {
+              const s = preProxyOut.settings?.servers?.[0]
+              if (s) preProxy = `${s.address}:${s.port}`
+            }
+          } catch { /* */ }
+
+          const result = await startSidecar(data.password, preProxy)
+          if (result.ok) {
+            const pac = generatePacScript()
+            for (const win of BrowserWindow.getAllWindows()) {
+              await win.webContents.session.setProxy({
+                pacScript: `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`
+              })
+            }
+          }
+        }
+        scheduleProxyRefresh()
+      }
+    } catch (err) {
+      console.error('[proxy-auth] refresh failed:', err)
+      // Retry in 5 minutes
+      proxyRefreshTimer = setTimeout(() => scheduleProxyRefresh(), 5 * 60 * 1000)
+    }
+  }, refreshIn)
+
+  console.log(`[proxy-auth] next refresh in ${Math.round(refreshIn / 60000)} min`)
+}
+
 ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
-  const result = await startSidecar(preProxy)
+  // Fetch proxy credentials first
+  const authRes = await authFetch('GET', '/api/proxy-auth/login')
+  if (authRes.status !== 200) {
+    const errData = authRes.data as { message?: string } | undefined
+    return {
+      ok: false,
+      error: typeof errData === 'object' && errData?.message
+        ? errData.message
+        : 'Failed to get proxy credentials'
+    }
+  }
+  const creds = authRes.data as { username: string; password: string; expireAt: string }
+  proxyCredentials = creds
+  console.log('[proxy-auth] got credentials, expires:', creds.expireAt)
+
+  const result = await startSidecar(creds.password, preProxy)
   if (result.ok) {
     const pac = generatePacScript()
     for (const win of BrowserWindow.getAllWindows()) {
@@ -489,15 +586,16 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
         pacScript: `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`
       })
     }
-    // Set system proxy so browsers also use the PAC
     await setSystemProxy().catch(() => { /* non-fatal */ })
-    // Set shell env so terminal tools (claude CLI etc.) also use the proxy
     setShellProxy()
+    scheduleProxyRefresh()
   }
   return result
 })
 
 ipcMain.handle('sidecar:stop', async () => {
+  if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
+  proxyCredentials = null
   await stopSidecar()
 
   for (const win of BrowserWindow.getAllWindows()) {
@@ -525,6 +623,62 @@ ipcMain.handle('settings:set', (_e, settings: AppSettings) => {
   return { ok: true }
 })
 
+// ── Auto-update ──
+
+function setupAutoUpdater(): void {
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('checking-for-update', () => {
+    broadcast('updater:status', { status: 'checking' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    broadcast('updater:status', { status: 'available', version: info.version })
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    broadcast('updater:status', { status: 'not-available' })
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    broadcast('updater:status', {
+      status: 'downloading',
+      percent: Math.round(progress.percent),
+    })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    broadcast('updater:status', { status: 'downloaded', version: info.version })
+  })
+
+  autoUpdater.on('error', (err) => {
+    broadcast('updater:status', { status: 'error', message: String(err) })
+  })
+
+  // Check now, then every 12 hours
+  autoUpdater.checkForUpdates().catch(() => {})
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {})
+  }, 12 * 60 * 60 * 1000)
+}
+
+function broadcast(channel: string, data: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, data)
+    }
+  }
+}
+
+ipcMain.handle('updater:install', () => {
+  autoUpdater.quitAndInstall(false, true)
+})
+
+ipcMain.handle('updater:check', () => {
+  autoUpdater.checkForUpdates().catch(() => {})
+})
+
 app.whenReady().then(() => {
   // Clean up any sing-box left by a previous crash
   killOrphanedSidecar()
@@ -541,6 +695,11 @@ app.whenReady().then(() => {
   }
 
   createWindow()
+
+  // Start auto-updater (skip in dev)
+  if (!is.dev) {
+    setupAutoUpdater()
+  }
 
   // Monitor sidecar crashes — immediately notify renderer
   onSidecarCrash((reason) => {
@@ -572,6 +731,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
+  if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
   await clearSystemProxy().catch(() => {})
   await stopSidecar()
 })

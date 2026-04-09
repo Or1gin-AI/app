@@ -8,6 +8,7 @@ interface PlanPageProps {
   expiresAt: string
   userEmail: string
   claudeAccountId: string
+  networkOk: boolean
   onBack?: () => void
   onRefresh: () => void
 }
@@ -31,6 +32,15 @@ const PLAN_ORDER: PlanId[] = ['free', 'pro', '5x', '20x']
 
 type PaymentTarget = PlanId | 'activation'
 
+type SmsData = {
+  activationId?: string
+  countryCode?: string
+  number?: string
+  fullNumber?: string
+  status?: string
+  code?: string
+}
+
 type ModalState =
   | null
   | { step: 'confirm'; target: PlanId }
@@ -38,9 +48,11 @@ type ModalState =
   | { step: 'payment'; target: PaymentTarget }
   | { step: 'waiting' }
   | { step: 'cancel-confirm' }
+  | { step: 'activate-confirm' }
+  | { step: 'activate'; phase: 'loading' | 'polling' | 'done' | 'error'; sms: SmsData; errorMsg?: string }
   | { step: 'error'; message: string }
 
-export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, onBack, onRefresh }: PlanPageProps) {
+export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, networkOk, onBack, onRefresh }: PlanPageProps) {
   const { t } = useLocale()
   const [modal, setModal] = useState<ModalState>(null)
   const [checkoutLoading, setCheckoutLoading] = useState<'stripe' | 'crypto' | null>(null)
@@ -49,7 +61,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, o
   // Activation balance
   const [activationBalance, setActivationBalance] = useState<number | null>(null)
 
-  useEffect(() => {
+  const refreshBalance = useCallback(() => {
     window.electronAPI.auth.profile().then((res) => {
       if (res.status >= 200 && res.status < 300) {
         const data = res.data as { smsVerificationBalance?: number }
@@ -58,9 +70,177 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, o
     }).catch(() => {})
   }, [])
 
+  useEffect(() => { refreshBalance() }, [refreshBalance])
+
   const handleBuyActivation = () => {
     setModal({ step: 'payment', target: 'activation' as PlanId })
   }
+
+  // SMS activation — cooldown persists at component level (survives modal close/reopen)
+  const smsPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [smsCooldownEnd, setSmsCooldownEnd] = useState(0)
+  const [smsCooldown, setSmsCooldown] = useState(0)
+  const smsCooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Cooldown ticker — runs at component level regardless of modal state
+  useEffect(() => {
+    if (smsCooldownEnd <= Date.now()) {
+      setSmsCooldown(0)
+      return
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((smsCooldownEnd - Date.now()) / 1000))
+      setSmsCooldown(remaining)
+      if (remaining <= 0 && smsCooldownTimerRef.current) {
+        clearInterval(smsCooldownTimerRef.current)
+        smsCooldownTimerRef.current = null
+      }
+    }
+    tick()
+    smsCooldownTimerRef.current = setInterval(tick, 1000)
+    return () => {
+      if (smsCooldownTimerRef.current) { clearInterval(smsCooldownTimerRef.current); smsCooldownTimerRef.current = null }
+    }
+  }, [smsCooldownEnd])
+
+  const stopSmsPoll = useCallback(() => {
+    if (smsPollRef.current) { clearInterval(smsPollRef.current); smsPollRef.current = null }
+  }, [])
+
+  useEffect(() => () => stopSmsPoll(), [stopSmsPoll])
+
+  const startSmsPoll = useCallback(() => {
+    stopSmsPoll()
+    smsPollRef.current = setInterval(async () => {
+      try {
+        const statusRes = await window.electronAPI.sms.status()
+        if (statusRes.status >= 200 && statusRes.status < 300) {
+          const data = statusRes.data as { status: string; code?: string }
+          if (data.status === 'CODE_RECEIVED' && data.code) {
+            stopSmsPoll()
+            setModal((prev) => {
+              if (!prev || prev.step !== 'activate') return prev
+              return { ...prev, phase: 'done', sms: { ...prev.sms, code: data.code, status: 'CODE_RECEIVED' } }
+            })
+          } else if (data.status === 'EXPIRED') {
+            stopSmsPoll()
+            setModal((prev) => {
+              if (!prev || prev.step !== 'activate') return prev
+              return { ...prev, phase: 'error', errorMsg: t.plan.activateExpired }
+            })
+          }
+        }
+      } catch { /* keep polling */ }
+    }, 10_000)
+  }, [stopSmsPoll, t])
+
+  // Click "Activate" button → show confirmation first
+  const handleActivateClick = useCallback(() => {
+    if (!networkOk) {
+      setModal({ step: 'error', message: t.plan.activateNeedNetwork })
+      return
+    }
+    setModal({ step: 'activate-confirm' })
+  }, [networkOk, t])
+
+  // After confirming → request number
+  const handleActivateConfirm = useCallback(async () => {
+    setModal({ step: 'activate', phase: 'loading', sms: {} })
+
+    try {
+      // Check if there's already an active number
+      const existing = await window.electronAPI.sms.phoneNumber()
+      let sms: SmsData
+      let isNew = false
+
+      if (existing.status >= 200 && existing.status < 300) {
+        sms = existing.data as SmsData
+      } else {
+        const res = await window.electronAPI.sms.requestNumber()
+        if (res.status < 200 || res.status >= 300) {
+          const errData = res.data as { message?: string } | undefined
+          setModal({
+            step: 'activate', phase: 'error', sms: {},
+            errorMsg: typeof errData === 'object' && errData?.message ? errData.message : t.plan.activateError,
+          })
+          return
+        }
+        sms = res.data as SmsData
+        isNew = true
+      }
+
+      setModal({ step: 'activate', phase: 'polling', sms })
+
+      // Start 2-min cooldown only for new numbers
+      if (isNew) {
+        setSmsCooldownEnd(Date.now() + 120_000)
+      }
+
+      startSmsPoll()
+    } catch {
+      setModal({ step: 'activate', phase: 'error', sms: {}, errorMsg: t.plan.activateError })
+    }
+  }, [t, startSmsPoll])
+
+  // Reopen activate modal (from activate button when already have active number)
+  const handleActivateReopen = useCallback(async () => {
+    if (!networkOk) {
+      setModal({ step: 'error', message: t.plan.activateNeedNetwork })
+      return
+    }
+
+    setModal({ step: 'activate', phase: 'loading', sms: {} })
+
+    try {
+      const existing = await window.electronAPI.sms.phoneNumber()
+      if (existing.status >= 200 && existing.status < 300) {
+        const sms = existing.data as SmsData
+        setModal({ step: 'activate', phase: 'polling', sms })
+        startSmsPoll()
+      } else {
+        // No active number — show confirmation
+        setModal({ step: 'activate-confirm' })
+      }
+    } catch {
+      setModal({ step: 'activate-confirm' })
+    }
+  }, [networkOk, t, startSmsPoll])
+
+  const handleRefreshNumber = useCallback(async () => {
+    stopSmsPoll()
+    setModal({ step: 'activate', phase: 'loading', sms: {} })
+    try {
+      const res = await window.electronAPI.sms.refreshNumber()
+      if (res.status >= 200 && res.status < 300) {
+        const sms = res.data as SmsData
+        setModal({ step: 'activate', phase: 'polling', sms })
+        setSmsCooldownEnd(Date.now() + 120_000)
+        startSmsPoll()
+      } else {
+        const errData = res.data as { message?: string } | undefined
+        setModal({
+          step: 'activate', phase: 'error', sms: {},
+          errorMsg: typeof errData === 'object' && errData?.message ? errData.message : t.plan.activateError,
+        })
+      }
+    } catch {
+      setModal({ step: 'activate', phase: 'error', sms: {}, errorMsg: t.plan.activateError })
+    }
+  }, [t, stopSmsPoll, startSmsPoll])
+
+  const handleRefundNumber = useCallback(async () => {
+    stopSmsPoll()
+    await window.electronAPI.sms.refund().catch(() => {})
+    setSmsCooldownEnd(0)
+    refreshBalance()
+    setModal(null)
+  }, [stopSmsPoll, refreshBalance])
+
+  const handleActivateClose = useCallback(() => {
+    // Don't stop polling — let it run in background so reopening restores state
+    refreshBalance()
+    setModal(null)
+  }, [refreshBalance])
 
   // Order history
   type Order = {
@@ -91,6 +271,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, o
     cleanupRef.current = window.electronAPI.payment.onCheckoutClosed(() => {
       setModal(null)
       onRefresh()
+      refreshBalance()
     })
     return () => {
       if (cleanupRef.current) cleanupRef.current()
@@ -219,8 +400,13 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, o
               {t.plan.activationBuy}
             </button>
             <button
-              disabled
-              className="text-xs px-3 py-1.5 rounded-lg border border-border-strong text-text-faint cursor-not-allowed opacity-50 ml-auto"
+              onClick={smsCooldown > 0 ? handleActivateReopen : handleActivateClick}
+              disabled={!activationBalance || activationBalance <= 0}
+              className={`text-xs px-3 py-1.5 rounded-lg ml-auto transition-opacity ${
+                activationBalance && activationBalance > 0
+                  ? 'bg-brand text-white cursor-pointer hover:opacity-90'
+                  : 'border border-border-strong text-text-faint cursor-not-allowed opacity-50'
+              }`}
             >
               {t.plan.activationActivate}
             </button>
@@ -469,6 +655,125 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, o
                 >
                   {t.plan.ok}
                 </button>
+              </>
+            )}
+
+            {/* Activation confirm */}
+            {modal.step === 'activate-confirm' && (
+              <>
+                <h3 className="font-serif text-base text-text mb-2">{t.plan.activateConfirmTitle}</h3>
+                <p className="text-sm text-text-muted mb-5">{t.plan.activateConfirmDesc}</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setModal(null)}
+                    className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors"
+                  >
+                    {t.plan.cancel}
+                  </button>
+                  <button
+                    onClick={handleActivateConfirm}
+                    className="flex-1 py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                  >
+                    {t.plan.confirm}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Activation */}
+            {modal.step === 'activate' && (
+              <>
+                <h3 className="font-serif text-base text-text mb-4">{t.plan.activateTitle}</h3>
+
+                {/* Loading */}
+                {modal.phase === 'loading' && (
+                  <div className="flex flex-col items-center py-6">
+                    <div className="w-5 h-5 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-3" />
+                    <p className="text-sm text-text-muted">{t.plan.activateRequesting}</p>
+                  </div>
+                )}
+
+                {/* Polling for code */}
+                {modal.phase === 'polling' && (
+                  <div>
+                    <div className="rounded-lg border border-border bg-bg-alt p-4 mb-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-text-faint font-mono">{t.plan.activatePhone}</span>
+                        <span className="text-sm text-text font-semibold font-mono">
+                          +{modal.sms.countryCode} {modal.sms.number}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-text-faint font-mono">{t.plan.activateStatus}</span>
+                        <span className="flex items-center gap-1.5 text-xs text-amber-500">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                          {t.plan.activateWaiting}
+                          {smsCooldown > 0 && (
+                            <span className="text-text-faint ml-1">
+                              ({Math.floor(smsCooldown / 60)}:{(smsCooldown % 60).toString().padStart(2, '0')})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-text-faint mb-4 text-center">{t.plan.activateWaitingDesc}</p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleRefreshNumber}
+                        disabled={smsCooldown > 0}
+                        className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {t.plan.activateRefresh}
+                      </button>
+                      <button
+                        onClick={handleRefundNumber}
+                        disabled={smsCooldown > 0}
+                        className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-muted cursor-pointer hover:bg-black/[0.03] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {t.plan.activateRefund}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Code received — no refresh/refund allowed */}
+                {modal.phase === 'done' && (
+                  <div>
+                    <div className="rounded-lg border border-border bg-bg-alt p-4 mb-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-text-faint font-mono">{t.plan.activatePhone}</span>
+                        <span className="text-sm text-text font-semibold font-mono">
+                          +{modal.sms.countryCode} {modal.sms.number}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-text-faint font-mono">{t.plan.activateCode}</span>
+                        <span className="text-lg text-brand font-bold font-mono tracking-wider">
+                          {modal.sms.code}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleActivateClose}
+                      className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                    >
+                      {t.plan.ok}
+                    </button>
+                  </div>
+                )}
+
+                {/* Error */}
+                {modal.phase === 'error' && (
+                  <div>
+                    <p className="text-sm text-red-500 mb-4">{modal.errorMsg}</p>
+                    <button
+                      onClick={handleActivateClose}
+                      className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                    >
+                      {t.plan.ok}
+                    </button>
+                  </div>
+                )}
               </>
             )}
 

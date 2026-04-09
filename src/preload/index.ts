@@ -25,6 +25,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     signOut: () => ipcRenderer.invoke('auth:sign-out'),
     restoreSession: () => ipcRenderer.invoke('auth:restore-session')
   },
+  proxyAuth: {
+    login: () => ipcRenderer.invoke('proxy-auth:login'),
+  },
+  sms: {
+    requestNumber: () => ipcRenderer.invoke('sms:request-number'),
+    phoneNumber: () => ipcRenderer.invoke('sms:phone-number'),
+    status: () => ipcRenderer.invoke('sms:status'),
+    refreshNumber: () => ipcRenderer.invoke('sms:refresh-number'),
+    refund: () => ipcRenderer.invoke('sms:refund'),
+  },
   payment: {
     checkout: (productType: string, provider?: string, claudeAccountId?: string) =>
       ipcRenderer.invoke('payment:checkout', productType, provider, claudeAccountId),
@@ -65,6 +75,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_: unknown, data: { ok: boolean; ip: string | null }) => cb(data)
       ipcRenderer.on('network-health', handler)
       return () => ipcRenderer.removeListener('network-health', handler)
+    }
+  },
+  updater: {
+    install: () => ipcRenderer.invoke('updater:install'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    onStatus: (cb: (data: { status: string; version?: string; percent?: number; message?: string }) => void) => {
+      const handler = (_: unknown, data: { status: string; version?: string; percent?: number; message?: string }) => cb(data)
+      ipcRenderer.on('updater:status', handler)
+      return () => ipcRenderer.removeListener('updater:status', handler)
     }
   }
 })

@@ -54,6 +54,16 @@ declare global {
           savedPassword: string
         }) => Promise<{ ok: boolean }>
       }
+      proxyAuth: {
+        login: () => Promise<AuthResponse>
+      }
+      sms: {
+        requestNumber: () => Promise<AuthResponse>
+        phoneNumber: () => Promise<AuthResponse>
+        status: () => Promise<AuthResponse>
+        refreshNumber: () => Promise<AuthResponse>
+        refund: () => Promise<AuthResponse>
+      }
       payment: {
         checkout: (productType: string, provider?: string, claudeAccountId?: string) => Promise<AuthResponse>
         openCheckout: (url: string) => Promise<{ ok: boolean }>
@@ -75,6 +85,16 @@ declare global {
         start: () => Promise<{ ok: boolean }>
         stop: () => Promise<{ ok: boolean }>
         onStatus: (cb: (data: { ok: boolean; ip: string | null }) => void) => () => void
+      }
+      updater: {
+        install: () => Promise<void>
+        check: () => Promise<void>
+        onStatus: (cb: (data: {
+          status: string
+          version?: string
+          percent?: number
+          message?: string
+        }) => void) => () => void
       }
     }
   }
