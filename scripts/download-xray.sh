@@ -71,8 +71,8 @@ fi
 
 echo ""
 echo "Done! Xray ${VERSION} binaries:"
-[ -f "${SIDECAR_DIR}/darwin-arm64/xray" ]  && ls -lh "${SIDECAR_DIR}/darwin-arm64/xray"
-[ -f "${SIDECAR_DIR}/darwin-x64/xray" ]    && ls -lh "${SIDECAR_DIR}/darwin-x64/xray"
-[ -f "${SIDECAR_DIR}/win32-x64/xray.exe" ] && ls -lh "${SIDECAR_DIR}/win32-x64/xray.exe"
-[ -f "${SIDECAR_DIR}/linux-x64/xray" ]     && ls -lh "${SIDECAR_DIR}/linux-x64/xray"
-[ -f "${SIDECAR_DIR}/linux-arm64/xray" ]   && ls -lh "${SIDECAR_DIR}/linux-arm64/xray"
+[ -f "${SIDECAR_DIR}/darwin-arm64/xray" ]  && ls -lh "${SIDECAR_DIR}/darwin-arm64/xray"  || true
+[ -f "${SIDECAR_DIR}/darwin-x64/xray" ]    && ls -lh "${SIDECAR_DIR}/darwin-x64/xray"    || true
+[ -f "${SIDECAR_DIR}/win32-x64/xray.exe" ] && ls -lh "${SIDECAR_DIR}/win32-x64/xray.exe" || true
+[ -f "${SIDECAR_DIR}/linux-x64/xray" ]     && ls -lh "${SIDECAR_DIR}/linux-x64/xray"     || true
+[ -f "${SIDECAR_DIR}/linux-arm64/xray" ]   && ls -lh "${SIDECAR_DIR}/linux-arm64/xray"   || true
