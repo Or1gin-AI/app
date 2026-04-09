@@ -294,6 +294,28 @@ export function isSidecarRunning(): boolean {
   return sidecarProcess !== null && !sidecarProcess.killed
 }
 
+/** Hot-update the proxy password: rewrite config + restart Xray (~1s, seamless) */
+export async function updateOutboundPassword(password: string): Promise<{ ok: boolean; error?: string }> {
+  if (!isSidecarRunning()) return { ok: false, error: 'Xray not running' }
+
+  const configDir = getConfigDir()
+  const configPath = join(configDir, 'config.json')
+
+  // Read current config to preserve preProxy settings
+  let preProxy: string | undefined
+  try {
+    const cfg = JSON.parse(readFileSync(configPath, 'utf-8'))
+    const preProxyOut = cfg.outbounds?.find((o: { tag: string }) => o.tag === 'pre-proxy')
+    if (preProxyOut?.settings?.servers?.[0]) {
+      const s = preProxyOut.settings.servers[0]
+      preProxy = `${s.address}:${s.port}`
+    }
+  } catch { /* use direct */ }
+
+  console.log('[xray] updating password, restarting...')
+  return startSidecar(password, preProxy || 'direct')
+}
+
 /** Kill any orphaned xray processes left from a previous crash */
 export function killOrphanedSidecar(): void {
   try {

@@ -79,18 +79,29 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
       </div>
 
       <div className="flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="px-6 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
-        >
-          {t.networkStatus.back}
-        </button>
-        <button
-          onClick={onReconfigure}
-          className="px-6 py-2.5 bg-bg-card border border-border text-text-secondary rounded-lg text-sm cursor-pointer hover:border-brand/40 transition-colors"
-        >
-          {t.networkStatus.reconfigure}
-        </button>
+        {proxyOk ? (
+          <>
+            <button
+              onClick={onBack}
+              className="px-6 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
+            >
+              {t.networkStatus.back}
+            </button>
+            <button
+              onClick={onReconfigure}
+              className="px-6 py-2.5 bg-bg-card border border-border text-text-secondary rounded-lg text-sm cursor-pointer hover:border-brand/40 transition-colors"
+            >
+              {t.networkStatus.reconfigure}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onReconfigure}
+            className="px-6 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
+          >
+            {t.networkStatus.reconfigure}
+          </button>
+        )}
       </div>
     </div>
   )

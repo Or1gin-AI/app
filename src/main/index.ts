@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -525,31 +525,11 @@ function scheduleProxyRefresh(): void {
         proxyCredentials = data
         console.log('[proxy-auth] credentials refreshed, new expiry:', data.expireAt)
 
-        // Restart xray with new credentials if running
+        // Update xray password if running
         if (isSidecarRunning()) {
-          // Read current config to determine preProxy
-          const configDir = join(app.getPath('userData'), 'xray')
-          const configPath = join(configDir, 'config.json')
-          let preProxy: string | undefined
-          try {
-            const cfg = JSON.parse(readFileSync(configPath, 'utf-8'))
-            const preProxyOut = cfg.outbounds?.find((o: { tag: string }) => o.tag === 'pre-proxy')
-            if (preProxyOut) {
-              const s = preProxyOut.settings?.servers?.[0]
-              if (s) preProxy = `${s.address}:${s.port}`
-            }
-          } catch { /* */ }
-
-          const result = await startSidecar(data.password, preProxy)
-          if (result.ok) {
-            const pac = generatePacScript()
-            for (const win of BrowserWindow.getAllWindows()) {
-              await win.webContents.session.setProxy({
-                pacScript: `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`
-              })
-            }
-          }
+          await updateOutboundPassword(data.password)
         }
+        console.log("[proxy-auth] credentials refreshed, new password:", data.password)
         scheduleProxyRefresh()
       }
     } catch (err) {
@@ -657,9 +637,9 @@ function setupAutoUpdater(): void {
   })
 
   // Check now, then every 12 hours
-  autoUpdater.checkForUpdates().catch(() => {})
+  autoUpdater.checkForUpdates().catch(() => { })
   setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => {})
+    autoUpdater.checkForUpdates().catch(() => { })
   }, 12 * 60 * 60 * 1000)
 }
 
@@ -676,7 +656,7 @@ ipcMain.handle('updater:install', () => {
 })
 
 ipcMain.handle('updater:check', () => {
-  autoUpdater.checkForUpdates().catch(() => {})
+  autoUpdater.checkForUpdates().catch(() => { })
 })
 
 app.whenReady().then(() => {
@@ -703,7 +683,7 @@ app.whenReady().then(() => {
 
   // Monitor sidecar crashes — immediately notify renderer
   onSidecarCrash((reason) => {
-  
+
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
         win.webContents.send('network-health', { ok: false, ip: null })
@@ -732,6 +712,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
-  await clearSystemProxy().catch(() => {})
+  await clearSystemProxy().catch(() => { })
   await stopSidecar()
 })
