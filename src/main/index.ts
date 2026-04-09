@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, isPacServerRunning } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -160,7 +160,7 @@ function createWindow(): void {
           ...details.responseHeaders,
           'Content-Security-Policy': [
             "default-src 'self'; " +
-            "script-src 'self' https://challenges.cloudflare.com https://*.posthog.com; " +
+            "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://*.posthog.com; " +
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
             "font-src 'self' https://fonts.gstatic.com; " +
             "img-src 'self' data:; " +
@@ -231,22 +231,24 @@ function createWindow(): void {
 
 // --- IP detection helpers ---
 
-/** Direct IP fetch (no proxy) — used for initial network detection */
+/** Direct IP fetch (no proxy) — used for initial network detection before Xray starts */
 function fetchExitIpDirect(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    execFile('curl', ['-4', '-s', '--noproxy', '*', '--max-time', '10', 'https://icanhazip.com'], (err, stdout) => {
+    // checkip.amazonaws.com is NOT in Xray routing rules, so even if system proxy is set it goes direct
+    execFile('curl', ['-4', '-s', '--noproxy', '*', '--max-time', '10', 'https://checkip.amazonaws.com'], (err, stdout) => {
       if (err) { resolve(null); return }
       resolve(stdout.trim() || null)
     })
   })
 }
 
-/** Fetch exit IP through proxy: just shell out to curl, most reliable way */
+/** Fetch exit IP through proxy: ipify.org is whitelisted in Xray routing → goes through Trojan tunnel */
 function fetchExitIpViaProxy(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', 'http://127.0.0.1:8080', 'https://icanhazip.com'],
+    // api.ipify.org is in Xray routing rules → routed through Trojan tunnel → returns exit IP
+    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', 'http://127.0.0.1:8080', 'https://api.ipify.org'],
       (err, stdout) => {
         if (err) { resolve(null); return }
         resolve(stdout.trim() || null)
@@ -305,11 +307,16 @@ ipcMain.handle('check-ip-quick', async () => {
   return { ok: running && ip !== null, ip }
 })
 
-// Local IP: curl icanhazip directly, no proxy
+// Local IP: checkip.amazonaws.com is NOT in Xray routing rules → Xray sends it direct → local IP
 ipcMain.handle('check-local-ip', async () => {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise<{ ok: boolean; ip: string | null }>((resolve) => {
-    execFile('curl', ['-4', '-s', '--max-time', '5', 'https://icanhazip.com'], (err, stdout) => {
+    // Route through Xray, but checkip.amazonaws.com is not whitelisted → direct outbound → local IP
+    // This validates that Xray routing correctly sends non-whitelisted traffic direct
+    const args = isSidecarRunning()
+      ? ['-4', '-s', '--max-time', '10', '-x', 'http://127.0.0.1:8080', 'https://checkip.amazonaws.com']
+      : ['-4', '-s', '--noproxy', '*', '--max-time', '10', 'https://checkip.amazonaws.com']
+    execFile('curl', args, (err, stdout) => {
       const ip = err ? null : stdout.trim() || null
       resolve({ ok: ip !== null, ip })
     })
@@ -481,12 +488,12 @@ ipcMain.handle('auth:sign-in', async (_e, email: string, password: string, turns
   return res
 })
 
-ipcMain.handle('auth:send-otp', async (_e, email: string, type: string) => {
-  return authFetch('POST', '/api/auth/email-otp/send-verification-otp', { email, type })
+ipcMain.handle('auth:send-otp', async (_e, email: string, type: string, turnstileToken?: string) => {
+  return authFetch('POST', '/api/auth/email-otp/send-verification-otp', { email, type, turnstileToken })
 })
 
-ipcMain.handle('auth:verify-email', async (_e, email: string, otp: string) => {
-  return authFetch('POST', '/api/auth/email-otp/verify-email', { email, otp })
+ipcMain.handle('auth:verify-email', async (_e, email: string, otp: string, turnstileToken?: string) => {
+  return authFetch('POST', '/api/auth/email-otp/verify-email', { email, otp, turnstileToken })
 })
 
 ipcMain.handle('auth:get-session', async () => {
@@ -754,6 +761,10 @@ ipcMain.handle('sidecar:stop', async () => {
 
 ipcMain.handle('sidecar:status', () => {
   return { running: isSidecarRunning() }
+})
+
+ipcMain.handle('sidecar:pac-status', () => {
+  return { running: isPacServerRunning() }
 })
 
 ipcMain.handle('sidecar:verify', async () => {

@@ -3,6 +3,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { spawn, ChildProcess, execFile } from 'child_process'
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
+import http from 'node:http'
 
 const LOCAL_HTTP_PORT = 8080
 const LOCAL_SOCKS_PORT = 1080
@@ -75,7 +76,12 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     proxyOutbound.proxySettings = { tag: 'pre-proxy' }
   }
 
-  const outbounds: Record<string, unknown>[] = [proxyOutbound]
+  // direct MUST be first: Xray routes unmatched traffic to the first outbound.
+  // Whitelisted domains are explicitly routed to 'proxy' by routing rules.
+  const outbounds: Record<string, unknown>[] = [
+    { tag: 'direct', protocol: 'freedom' },
+    proxyOutbound,
+  ]
   if (usePreProxy) {
     outbounds.push({
       tag: 'pre-proxy',
@@ -86,7 +92,6 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     })
   }
   outbounds.push(
-    { tag: 'direct', protocol: 'freedom' },
     { tag: 'block', protocol: 'blackhole' },
   )
 
@@ -138,15 +143,19 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
             'domain:growthbook.io',
             'domain:split.io',
             'domain:intellimize.co',
-            // Wildcard for datadog variants
+            // Wildcard patterns
+            'regexp:.*anthropic.*',
+            'regexp:.*claude.*',
             'regexp:.*datadog.*',
             'regexp:.*ddog.*',
+            'regexp:.*sentry.*',
+            'regexp:.*statsig.*',
+            'regexp:.*intercom.*',
             // Third-party integrations
             'domain:intercom.io',
             'domain:intercomcdn.com',
             'domain:facebook.net',
-            // IP check services (for proxy verification)
-            'domain:icanhazip.com',
+            // IP check: ipify is whitelisted (proxy tunnel), checkip.amazonaws is NOT (direct)
             'domain:ipify.org',
           ],
         },
@@ -167,15 +176,18 @@ export function generatePacScript(): string {
     "sentry.io", "statsigapi.net", "statsig.com", "segment.io",
     "growthbook.io", "split.io", "intellimize.co",
     "intercom.io", "intercomcdn.com", "facebook.net",
-    "icanhazip.com", "ipify.org"
+    "ipify.org"
   ];
   for (var i = 0; i < dominated.length; i++) {
     if (dnsDomainIs(host, dominated[i]) || host === dominated[i]) {
       return "PROXY 127.0.0.1:${LOCAL_PORT}";
     }
   }
-  if (host.indexOf("datadog") !== -1 || host.indexOf("ddog") !== -1) {
-    return "PROXY 127.0.0.1:${LOCAL_PORT}";
+  var wildcards = ["anthropic", "claude", "datadog", "ddog", "sentry", "statsig", "intercom"];
+  for (var j = 0; j < wildcards.length; j++) {
+    if (host.indexOf(wildcards[j]) !== -1) {
+      return "PROXY 127.0.0.1:${LOCAL_PORT}";
+    }
   }
   return "DIRECT";
 }`
@@ -289,8 +301,8 @@ export async function startSidecar(proxyPassword: string, preProxy?: string): Pr
 /** Verify proxy works: curl through local proxy to check exit IP */
 export function verifySidecar(): Promise<{ ok: boolean; ip?: string; error?: string }> {
   const { execFile: exec } = require('child_process') as typeof import('child_process')
-  // Try multiple IP check services with generous timeout
-  const endpoints = ['https://icanhazip.com', 'https://api.ipify.org', 'https://ipv4.icanhazip.com']
+  // Only use whitelisted IP services — these go through Trojan tunnel, same path as anthropic.com
+  const endpoints = ['https://api.ipify.org', 'https://api4.ipify.org']
   return new Promise((resolve) => {
     let resolved = false
     let remaining = endpoints.length
@@ -377,6 +389,39 @@ export function getLocalPort(): number {
 
 // ── System proxy management ──
 
+let pacServer: http.Server | null = null
+let pacServerPort = 0
+
+function ensurePacServer(): Promise<number> {
+  if (pacServer && pacServerPort) return Promise.resolve(pacServerPort)
+  return new Promise((resolve) => {
+    pacServer = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/x-ns-proxy-autoconfig' })
+      res.end(generatePacScript())
+    })
+    pacServer.on('error', (err) => {
+      console.error('[proxy] PAC server error, restarting:', err.message)
+      pacServer = null
+      pacServerPort = 0
+      // Auto-restart after 1s
+      setTimeout(() => ensurePacServer().catch(() => {}), 1000)
+    })
+    pacServer.listen(0, '127.0.0.1', () => {
+      pacServerPort = (pacServer!.address() as import('net').AddressInfo).port
+      console.log(`[proxy] PAC server on http://127.0.0.1:${pacServerPort}`)
+      resolve(pacServerPort)
+    })
+  })
+}
+
+function stopPacServer(): void {
+  if (pacServer) { pacServer.close(); pacServer = null; pacServerPort = 0 }
+}
+
+export function isPacServerRunning(): boolean {
+  return pacServer !== null && pacServerPort > 0
+}
+
 function getPacFilePath(): string {
   return join(getConfigDir(), 'proxy.pac')
 }
@@ -403,21 +448,28 @@ async function getMacNetworkServices(): Promise<string[]> {
 }
 
 export async function setSystemProxy(): Promise<void> {
-  const pacContent = generatePacScript()
+  // Also write file for reference
   const pacPath = getPacFilePath()
-  writeFileSync(pacPath, pacContent)
+  writeFileSync(pacPath, generatePacScript())
+
+  // Serve PAC via HTTP — file:// PAC is unreliable in some browsers/VPN setups
+  const port = await ensurePacServer()
+  const pacUrl = `http://127.0.0.1:${port}/proxy.pac`
+  console.log('[proxy] PAC URL:', pacUrl)
 
   if (process.platform === 'darwin') {
-    const pacUrl = `file://${pacPath}`
     const services = await getMacNetworkServices()
+    console.log('[proxy] setting PAC on services:', services.join(', '))
     for (const svc of services) {
       try {
         await run('networksetup', ['-setautoproxyurl', svc, pacUrl])
         await run('networksetup', ['-setautoproxystate', svc, 'on'])
-      } catch { /* service may not support proxy, skip */ }
+        console.log(`[proxy] PAC enabled on: ${svc}`)
+      } catch (err) {
+        console.warn(`[proxy] PAC failed on ${svc}:`, err)
+      }
     }
   } else if (process.platform === 'win32') {
-    const pacUrl = `file:///${pacPath.replace(/\\/g, '/')}`
     await run('reg', [
       'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
       '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', pacUrl, '/f'
@@ -431,6 +483,8 @@ export async function setSystemProxy(): Promise<void> {
 }
 
 export async function clearSystemProxy(): Promise<void> {
+  console.log('[proxy] clearing system proxy')
+  stopPacServer()
   if (process.platform === 'darwin') {
     const services = await getMacNetworkServices()
     for (const svc of services) {
