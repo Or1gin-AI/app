@@ -142,7 +142,14 @@ jobs:
     needs: [build-mac, build-win, build-linux-x64]
     runs-on: ubuntu-latest
     steps:
-      - name: Publish release (remove draft)
-        run: gh release edit ${{ github.ref_name }} --draft=false --repo ${{ github.repository }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Extract changelog and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git cat-file -p ${{ github.ref_name }} | sed '1,/^$/d' > /tmp/changelog.md
+          gh release edit ${{ github.ref_name }} --notes-file /tmp/changelog.md --draft=false --repo ${{ github.repository }}
