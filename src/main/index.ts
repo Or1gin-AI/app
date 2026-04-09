@@ -5,7 +5,7 @@ import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
 import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
@@ -104,6 +104,24 @@ async function authFetch(
   return { status: resp.status, data }
 }
 
+// Forward main process logs to renderer DevTools
+const origLog = console.log
+const origErr = console.error
+const origWarn = console.warn
+function sendToRenderer(level: string, ...args: unknown[]) {
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.executeJavaScript(
+        `console.${level}('[main]', ${JSON.stringify(msg)})`
+      ).catch(() => { })
+    }
+  }
+}
+console.log = (...args: unknown[]) => { origLog(...args); sendToRenderer('log', ...args) }
+console.error = (...args: unknown[]) => { origErr(...args); sendToRenderer('error', ...args) }
+console.warn = (...args: unknown[]) => { origWarn(...args); sendToRenderer('warn', ...args) }
+
 function createWindow(): void {
   const isMac = process.platform === 'darwin'
 
@@ -133,6 +151,27 @@ function createWindow(): void {
     }
   })
 
+  // Set CSP — only inject on our own pages (localhost), not on external API responses
+  mainWindow.webContents.session.webRequest.onHeadersReceived(
+    { urls: ['http://localhost:*/*', 'http://127.0.0.1:*/*'] },
+    (details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+            "script-src 'self' https://challenges.cloudflare.com https://*.posthog.com; " +
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+            "font-src 'self' https://fonts.gstatic.com; " +
+            "img-src 'self' data:; " +
+            "frame-src https://challenges.cloudflare.com; " +
+            "connect-src * https: wss:;"
+          ]
+        }
+      })
+    }
+  )
+
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
@@ -142,19 +181,51 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // Disable DevTools in production
-  if (!is.dev) {
-    mainWindow.webContents.on('before-input-event', (_e, input) => {
-      if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) {
-        _e.preventDefault()
-      }
-    })
-  }
+  // Allow DevTools via Cmd+Shift+I / Ctrl+Shift+I in all builds
+  mainWindow.webContents.on('before-input-event', (_e, input) => {
+    const isMac = process.platform === 'darwin'
+    if ((isMac ? input.meta : input.control) && input.shift && input.key.toLowerCase() === 'i') {
+      mainWindow.webContents.toggleDevTools()
+    }
+  })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    // Serve via localhost so Turnstile works (file:// has null origin, Cloudflare rejects it)
+    const rendererDir = join(__dirname, '../renderer')
+    const { extname: pathExt } = require('path') as typeof import('path')
+    const MIME: Record<string, string> = {
+      '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
+      '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml',
+      '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+      '.ico': 'image/x-icon', '.webp': 'image/webp',
+    }
+    const srv = http.createServer((req, res) => {
+      const raw = (req.url || '/').split('?')[0]
+      const decoded = decodeURIComponent(raw)
+      let filePath = join(rendererDir, decoded === '/' ? 'index.html' : decoded)
+
+      if (!existsSync(filePath)) {
+        // Assets with extension → 404; routes without extension → SPA fallback
+        if (pathExt(decoded)) {
+          res.writeHead(404); res.end(); return
+        }
+        filePath = join(rendererDir, 'index.html')
+      }
+
+      const ext = pathExt(filePath).toLowerCase()
+      const contentType = MIME[ext] || 'application/octet-stream'
+      const stat = statSync(filePath)
+      res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': stat.size })
+      createReadStream(filePath).pipe(res)
+    })
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as import('net').AddressInfo).port
+      console.log(`[renderer] serving on http://localhost:${port}`)
+      mainWindow.loadURL(`http://localhost:${port}`)
+    })
   }
 }
 
@@ -164,7 +235,7 @@ function createWindow(): void {
 function fetchExitIpDirect(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    execFile('curl', ['-4', '-s', '--max-time', '10', 'https://icanhazip.com'], (err, stdout) => {
+    execFile('curl', ['-4', '-s', '--noproxy', '*', '--max-time', '10', 'https://icanhazip.com'], (err, stdout) => {
       if (err) { resolve(null); return }
       resolve(stdout.trim() || null)
     })
@@ -619,12 +690,12 @@ function scheduleProxyRefresh(): void {
         const data = res.data as { username: string; password: string; expireAt: string }
         proxyCredentials = data
         console.log('[proxy-auth] credentials refreshed, new expiry:', data.expireAt)
+        console.log("[proxy-auth] credentials refreshed, new password:", data.password)
 
         // Update xray password if running
         if (isSidecarRunning()) {
           await updateOutboundPassword(data.password)
         }
-        console.log("[proxy-auth] credentials refreshed, new password:", data.password)
         scheduleProxyRefresh()
       }
     } catch (err) {
@@ -653,7 +724,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   proxyCredentials = creds
   console.log('[proxy-auth] got credentials, expires:', creds.expireAt)
 
-  const result = await startSidecar(creds.password, preProxy)
+  const result = await startSidecar('123456', preProxy) // TODO: restore creds.password after server gRPC is fixed
   if (result.ok) {
     const pac = generatePacScript()
     for (const win of BrowserWindow.getAllWindows()) {
