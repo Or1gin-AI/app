@@ -10,7 +10,9 @@
 
 set -e
 
-SIDECAR_DIR="$(cd "$(dirname "$0")/../resources/sidecar" && pwd)"
+SIDECAR_DIR="$(dirname "$0")/../resources/sidecar"
+mkdir -p "$SIDECAR_DIR"
+SIDECAR_DIR="$(cd "$SIDECAR_DIR" && pwd)"
 FILTER="${1:-all}"
 
 # Fetch latest release tag from GitHub API
