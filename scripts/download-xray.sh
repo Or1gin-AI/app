@@ -15,9 +15,13 @@ mkdir -p "$SIDECAR_DIR"
 SIDECAR_DIR="$(cd "$SIDECAR_DIR" && pwd)"
 FILTER="${1:-all}"
 
-# Fetch latest release tag from GitHub API
+# Fetch latest release tag from GitHub API (use GH_TOKEN if available to avoid rate limits)
 echo "Fetching latest Xray-core version..."
-VERSION=$(curl -sL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+AUTH_HEADER=""
+if [ -n "$GH_TOKEN" ]; then
+  AUTH_HEADER="-H Authorization: token ${GH_TOKEN}"
+fi
+VERSION=$(curl -sL $AUTH_HEADER "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
 if [ -z "$VERSION" ]; then
   echo "ERROR: Failed to fetch latest version" >&2
   exit 1
