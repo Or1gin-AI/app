@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import { useLocale } from '@/i18n/context'
+import { TicketPanel } from '@/components/TicketPanel'
 
 type PlanId = 'free' | 'pro' | '5x' | '20x'
 
@@ -56,6 +58,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
   const { t } = useLocale()
   const [modal, setModal] = useState<ModalState>(null)
   const [checkoutLoading, setCheckoutLoading] = useState<'stripe' | 'crypto' | null>(null)
+  const [showTickets, setShowTickets] = useState(false)
   const cleanupRef = useRef<(() => void) | null>(null)
 
   // Activation balance
@@ -369,7 +372,15 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
 
         {/* Account Status & Activation */}
         <div className="rounded-xl border border-border bg-bg-card p-5 mb-8">
-          <h2 className="font-serif text-lg text-text mb-4">{t.plan.accountStatus}</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-serif text-lg text-text">{t.plan.accountStatus}</h2>
+            <button
+              onClick={() => setShowTickets(true)}
+              className="text-[11px] px-3 py-1.5 rounded-lg border border-border-strong text-text-muted hover:text-brand hover:border-brand/40 cursor-pointer transition-colors bg-transparent"
+            >
+              {t.ticket.button}
+            </button>
+          </div>
           <div className="flex gap-6 text-sm">
             <div className="min-w-0 flex-1">
               <p className="text-text-faint text-xs font-mono mb-1">{t.plan.email}</p>
@@ -521,6 +532,17 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
           )}
         </div>
       </div>
+
+      {/* ===== Ticket Panel ===== */}
+      <AnimatePresence>
+        {showTickets && (
+          <TicketPanel
+            userId={userEmail}
+            userName={userEmail.split('@')[0]}
+            onClose={() => setShowTickets(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ===== Modals ===== */}
       {modal && (

@@ -391,7 +391,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
         {optimizeError ? t.network.optimizeFailed : progress >= 100 ? t.network.optimizeDone : t.network.optimizing}
       </h2>
       <p className="text-[13px] text-text-muted mb-7 text-center max-w-[380px]">
-        {optimizeError ? optimizeError : progress >= 100 ? t.network.optimizeDoneDesc : t.network.optimizingDesc}
+        {optimizeError ? t.network.optimizeFailedDesc : progress >= 100 ? t.network.optimizeDoneDesc : t.network.optimizingDesc}
       </p>
 
       {!optimizeError && (
@@ -415,7 +415,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
 
       {optimizeError ? (
         <button
-          onClick={() => setView('result')}
+          onClick={() => setView('proxy-mode')}
           className="px-8 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
         >
           {t.network.retry}
@@ -425,7 +425,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
           onClick={onComplete}
           className="px-8 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
         >
-          {t.network.startOptimize}
+          {t.network.optimizeDone}
         </button>
       ) : (
         <p className="text-[11px] text-text-faint">{t.network.autoRedirect}</p>
