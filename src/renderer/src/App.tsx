@@ -183,9 +183,7 @@ function App(): React.JSX.Element {
     cleanupRef.current = window.electronAPI.health.onStatus((data) => {
       setNetworkOk(data.ok)
       setExitIp(data.ip)
-      if (!data.ok) {
-        setPage('network-status')
-      }
+      // Only redirect from main page — don't interrupt network setup or other pages
     })
   }, [page, userPlan])
 

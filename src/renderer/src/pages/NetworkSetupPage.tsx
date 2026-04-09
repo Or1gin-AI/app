@@ -42,6 +42,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   // Pre-proxy state
   const [preProxyHost, setPreProxyHost] = useState('127.0.0.1')
   const [preProxyPort, setPreProxyPort] = useState('7890')
+  const [lastProxyAddr, setLastProxyAddr] = useState('')
 
   // Detect IP on mount
   useEffect(() => {
@@ -60,6 +61,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   }, [])
 
   const startOptimize = useCallback(async (proxyAddr: string) => {
+    setLastProxyAddr(proxyAddr)
     setView('optimizing')
     setProgress(0)
     setStep(0)
@@ -69,7 +71,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     setStep(0)
     setProgress(15)
 
-    // Step 1: start sing-box
+    // Step 1: start xray
     setStep(1)
     setProgress(30)
     const startResult = await window.electronAPI.sidecar.start(proxyAddr)
@@ -85,7 +87,6 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     const verifyResult = await window.electronAPI.sidecar.verify()
     if (!verifyResult.ok) {
       setOptimizeError(verifyResult.error || 'Connection verification failed')
-      await window.electronAPI.sidecar.stop()
       return
     }
     setProgress(90)
@@ -93,8 +94,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     // Step 3: done
     setStep(3)
     setProgress(100)
-    setTimeout(onComplete, 800)
-  }, [onComplete])
+  }, [])
 
   const steps = [
     t.network.stepDetect,
@@ -415,10 +415,17 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
 
       {optimizeError ? (
         <button
-          onClick={() => setView('proxy-mode')}
+          onClick={() => setView('result')}
           className="px-8 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
         >
           {t.network.retry}
+        </button>
+      ) : progress >= 100 ? (
+        <button
+          onClick={onComplete}
+          className="px-8 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
+        >
+          {t.network.startOptimize}
         </button>
       ) : (
         <p className="text-[11px] text-text-faint">{t.network.autoRedirect}</p>
