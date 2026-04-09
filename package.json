@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "description": "OriginAI Desktop Client",
   "main": "./out/main/index.js",
-  "author": "OriginAI",
+  "author": {
+    "name": "OriginAI",
+    "email": "kevin.zhong@teams.originai.cc"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
