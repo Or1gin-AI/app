@@ -109,34 +109,72 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     ],
     outbounds,
     routing: {
-      domainStrategy: 'IPIfNonMatch',
+      domainStrategy: 'AsIs',
       rules: [
         {
           type: 'field',
-          outboundTag: 'direct',
-          domain: ['geosite:cn'],
-        },
-        {
-          type: 'field',
-          outboundTag: 'direct',
-          ip: ['geoip:cn', 'geoip:private'],
-        },
-        {
-          type: 'field',
           outboundTag: 'proxy',
-          network: 'tcp,udp',
+          domain: [
+            // Core services
+            'domain:anthropic.com',
+            'domain:anthropic.co',
+            'domain:claude.ai',
+            'domain:claude.com',
+            'domain:claudeusercontent.com',
+            'domain:storage.googleapis.com',
+            // Telemetry / analytics
+            'domain:datadoghq.com',
+            'domain:datadog.com',
+            'domain:ddog-gov.com',
+            'domain:datadoghq.eu',
+            'domain:browser-intake-us5-datadoghq.com',
+            'domain:browser-intake-datadoghq.com',
+            'domain:browser-intake-us3-datadoghq.com',
+            'domain:browser-intake-us1-datadoghq.com',
+            'domain:sentry.io',
+            'domain:statsigapi.net',
+            'domain:statsig.com',
+            'domain:segment.io',
+            'domain:growthbook.io',
+            'domain:split.io',
+            'domain:intellimize.co',
+            // Wildcard for datadog variants
+            'regexp:.*datadog.*',
+            'regexp:.*ddog.*',
+            // Third-party integrations
+            'domain:intercom.io',
+            'domain:intercomcdn.com',
+            'domain:facebook.net',
+            // IP check services (for proxy verification)
+            'domain:icanhazip.com',
+            'domain:ipify.org',
+          ],
         },
       ],
+      // Everything else goes direct
     },
   }
 }
 
 export function generatePacScript(): string {
   return `function FindProxyForURL(url, host) {
-  if (shExpMatch(host, "*.claude.ai") || shExpMatch(host, "*.anthropic.com") || shExpMatch(host, "claude.ai") || shExpMatch(host, "anthropic.com")) {
-    return "PROXY 127.0.0.1:${LOCAL_PORT}";
+  var dominated = [
+    "anthropic.com", "anthropic.co", "claude.ai", "claude.com",
+    "claudeusercontent.com", "storage.googleapis.com",
+    "datadoghq.com", "datadog.com", "ddog-gov.com", "datadoghq.eu",
+    "browser-intake-us5-datadoghq.com", "browser-intake-datadoghq.com",
+    "browser-intake-us3-datadoghq.com", "browser-intake-us1-datadoghq.com",
+    "sentry.io", "statsigapi.net", "statsig.com", "segment.io",
+    "growthbook.io", "split.io", "intellimize.co",
+    "intercom.io", "intercomcdn.com", "facebook.net",
+    "icanhazip.com", "ipify.org"
+  ];
+  for (var i = 0; i < dominated.length; i++) {
+    if (dnsDomainIs(host, dominated[i]) || host === dominated[i]) {
+      return "PROXY 127.0.0.1:${LOCAL_PORT}";
+    }
   }
-  if (host === "icanhazip.com" || host === "ipv4.icanhazip.com" || host === "ipinfo.io" || host === "api.ipify.org") {
+  if (host.indexOf("datadog") !== -1 || host.indexOf("ddog") !== -1) {
     return "PROXY 127.0.0.1:${LOCAL_PORT}";
   }
   return "DIRECT";
