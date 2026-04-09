@@ -31,6 +31,8 @@ jobs:
 
       - name: Download latest Xray (macOS)
         run: bash scripts/download-xray.sh darwin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write .env
         run: |
@@ -68,6 +70,8 @@ jobs:
       - name: Download latest Xray (Windows)
         shell: bash
         run: bash scripts/download-xray.sh win32
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write .env
         shell: bash
@@ -100,6 +104,8 @@ jobs:
 
       - name: Download latest Xray (Linux)
         run: bash scripts/download-xray.sh linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write .env
         run: |
