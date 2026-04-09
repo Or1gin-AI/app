@@ -177,28 +177,39 @@ function Turnstile({ onToken }: { onToken: (token: string | null) => void }) {
   useEffect(() => {
     const mount = () => {
       if (!containerRef.current || !window.turnstile || widgetIdRef.current) return
-      widgetIdRef.current = window.turnstile.render(containerRef.current, {
-        sitekey: TURNSTILE_SITE_KEY,
-        callback: (token) => onToken(token),
-        'expired-callback': () => onToken(null),
-        'error-callback': () => onToken(null),
-        theme: 'light',
-      })
+      try {
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          callback: (token) => onToken(token),
+          'expired-callback': () => onToken(null),
+          'error-callback': () => onToken(null),
+          theme: 'light',
+        })
+      } catch {
+        // Turnstile may fail in file:// protocol (production builds)
+        // Allow login without captcha in this case
+        console.warn('[Turnstile] render failed, skipping captcha')
+        onToken('skip')
+      }
     }
 
     // turnstile script might not be loaded yet
     if (window.turnstile) {
       mount()
     } else {
+      // If script doesn't load within 5s (e.g. file:// or offline), skip
+      let elapsed = 0
       const interval = setInterval(() => {
+        elapsed += 200
         if (window.turnstile) { clearInterval(interval); mount() }
+        else if (elapsed >= 5000) { clearInterval(interval); onToken('skip') }
       }, 200)
       return () => clearInterval(interval)
     }
 
     return () => {
       if (widgetIdRef.current && window.turnstile) {
-        window.turnstile.remove(widgetIdRef.current)
+        try { window.turnstile.remove(widgetIdRef.current) } catch { /* */ }
         widgetIdRef.current = null
       }
     }
@@ -342,9 +353,17 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         const data = res.data as { user?: { email: string; name: string } }
         onLogin({ email: data.user?.email ?? email, name: data.user?.name ?? '' })
       } else if (res.status === 403) {
-        setError(t.login.errorEmailNotVerified)
-        setView('otp')
-        await window.electronAPI.auth.sendOtp(email, 'email-verification')
+        const errData = res.data as { message?: string; code?: string } | undefined
+        const msg = typeof errData === 'object' && errData?.message ? errData.message.toLowerCase() : ''
+        if (msg.includes('email') && msg.includes('verif')) {
+          // Genuinely unverified email
+          setError(t.login.errorEmailNotVerified)
+          setView('otp')
+          await window.electronAPI.auth.sendOtp(email, 'email-verification')
+        } else {
+          // Turnstile failure or other 403
+          setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorSignInFailed)
+        }
       } else {
         setError(t.login.errorSignInFailed)
       }
@@ -811,9 +830,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 )}
               </div>
 
+              <Turnstile onToken={handleTurnstileToken} />
+
               <button
                 onClick={handleResetPassword}
-                disabled={loading || !resetReady}
+                disabled={loading || !resetReady || !turnstileToken}
                 className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? '...' : t.login.resetSubmit}
