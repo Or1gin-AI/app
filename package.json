@@ -4,9 +4,6 @@
   "description": "OriginAI Desktop Client",
   "main": "./out/main/index.js",
   "author": "OriginAI",
-  "build": {
-    "extends": null
-  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
