@@ -3,6 +3,7 @@ out
 dist
 .superpowers
 .DS_Store
+.env
 
 # Xray binaries & geo data (downloaded by scripts/download-xray.sh)
 resources/sidecar/*/xray

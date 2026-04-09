@@ -33,6 +33,8 @@ declare global {
         sendOtp: (email: string, type: string) => Promise<AuthResponse>
         verifyEmail: (email: string, otp: string) => Promise<AuthResponse>
         getSession: () => Promise<AuthResponse>
+        getNewuser: () => Promise<AuthResponse>
+        setNewuser: (value: number) => Promise<AuthResponse>
         resetPassword: (email: string, otp: string, newPassword: string) => Promise<AuthResponse>
         profile: () => Promise<AuthResponse>
         signOut: () => Promise<AuthResponse>
@@ -75,11 +77,23 @@ declare global {
         list: () => Promise<AuthResponse>
         listenEmail: (email?: string) => Promise<AuthResponse>
       }
+      ticket: {
+        list: (userId: string, userName: string, params: string) => Promise<AuthResponse>
+        detail: (userId: string, userName: string, ticketId: string) => Promise<AuthResponse>
+        create: (userId: string, userName: string, body: Record<string, unknown>) => Promise<AuthResponse>
+        timeline: (userId: string, userName: string, ticketId: string) => Promise<AuthResponse>
+        comment: (userId: string, userName: string, ticketId: string, content: string) => Promise<AuthResponse>
+      }
       sidecar: {
         start: (preProxy?: string) => Promise<{ ok: boolean; error?: string }>
         stop: () => Promise<{ ok: boolean }>
         status: () => Promise<{ running: boolean }>
         verify: () => Promise<{ ok: boolean; ip?: string; error?: string }>
+      }
+      session: {
+        startCheck: () => Promise<{ ok: boolean }>
+        stopCheck: () => Promise<{ ok: boolean }>
+        onExpired: (cb: () => void) => () => void
       }
       health: {
         start: () => Promise<{ ok: boolean }>

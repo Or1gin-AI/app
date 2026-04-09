@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { usePostHog } from '@posthog/react'
 import { LocaleProvider } from '@/i18n/context'
 import { Titlebar } from '@/components/Titlebar'
 import { LoginPage } from '@/pages/LoginPage'
@@ -8,6 +9,7 @@ import { MainPage } from '@/pages/MainPage'
 import { PlanPage } from '@/pages/PlanPage'
 import { NetworkStatusPage } from '@/pages/NetworkStatusPage'
 import { useLocale } from '@/i18n/context'
+import { OnboardingModal } from '@/components/OnboardingModal'
 import type { PlanId } from '@/pages/PlanPage'
 
 type Page = 'loading' | 'login' | 'network' | 'network-status' | 'main' | 'plan'
@@ -72,12 +74,14 @@ function UpdateOverlay({ status, version, percent }: { status: string; version: 
 }
 
 function App(): React.JSX.Element {
+  const posthog = usePostHog()
   const [page, setPage] = useState<Page>('loading')
   const [userEmail, setUserEmail] = useState('')
   const [userName, setUserName] = useState('')
   const [userPlan, setUserPlan] = useState<PlanId>('free')
   const [planExpires, setPlanExpires] = useState('')
   const [claudeAccountId, setClaudeAccountId] = useState('')
+  const [showOnboarding, setShowOnboarding] = useState(false)
   const [networkOk, setNetworkOk] = useState(true)
   const [exitIp, setExitIp] = useState<string | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -93,6 +97,15 @@ function App(): React.JSX.Element {
       setUpdateStatus(data.status)
       if (data.version) setUpdateVersion(data.version)
       if (data.percent !== undefined) setUpdatePercent(data.percent)
+    })
+    return cleanup
+  }, [])
+
+  // Listen for session expiry (kicked out by another login)
+  const logoutRef = useRef<((skipSignOut?: boolean) => void) | null>(null)
+  useEffect(() => {
+    const cleanup = window.electronAPI.session.onExpired(() => {
+      logoutRef.current?.(true) // skip signOut since session is already dead
     })
     return cleanup
   }, [])
@@ -130,8 +143,18 @@ function App(): React.JSX.Element {
       if (res.ok && res.user) {
         setUserEmail(res.user.email)
         setUserName(res.user.name ?? '')
+        posthog.identify(res.user.email, { name: res.user.name ?? '' })
+        window.electronAPI.session.startCheck()
         const plan = await fetchSubscription()
-        setPage(plan === 'free' ? 'plan' : 'network')
+        if (plan === 'free') {
+          setPage('plan')
+        } else {
+          // Check if new user needs onboarding
+          const nuRes = await window.electronAPI.auth.getNewuser().catch(() => null)
+          const isNew = nuRes && nuRes.status === 200 && (nuRes.data as { isNewuser?: number })?.isNewuser === 1
+          if (isNew) setShowOnboarding(true)
+          setPage('network')
+        }
       } else {
         setPage('login')
       }
@@ -139,6 +162,13 @@ function App(): React.JSX.Element {
       setPage('login')
     })
   }, [fetchSubscription])
+
+  // Track page views
+  useEffect(() => {
+    if (page !== 'loading') {
+      posthog.capture('$pageview', { page })
+    }
+  }, [page, posthog])
 
   // Page access guards
   useEffect(() => {
@@ -190,33 +220,49 @@ function App(): React.JSX.Element {
   const handleLogin = useCallback(async (user: { email: string; name: string }) => {
     setUserEmail(user.email)
     setUserName(user.name)
+    posthog.identify(user.email, { name: user.name })
+    posthog.capture('user_logged_in')
+    window.electronAPI.session.startCheck()
     const plan = await fetchSubscription()
-    setPage(plan === 'free' ? 'plan' : 'network')
-  }, [fetchSubscription])
+    if (plan === 'free') {
+      setPage('plan')
+    } else {
+      const nuRes = await window.electronAPI.auth.getNewuser().catch(() => null)
+      const isNew = nuRes && nuRes.status === 200 && (nuRes.data as { isNewuser?: number })?.isNewuser === 1
+      if (isNew) setShowOnboarding(true)
+      setPage('network')
+    }
+  }, [fetchSubscription, posthog])
 
   const handleNetworkComplete = useCallback(async () => {
     setNetworkOk(true)
     setPage('main')
+    posthog.capture('network_optimization_complete')
     // Immediately refresh exit IP after optimization
     const res = await window.electronAPI.checkIpQuick()
     setNetworkOk(res.ok)
     setExitIp(res.ip)
-  }, [])
+  }, [posthog])
 
-  const handleLogout = useCallback(async () => {
-    try {
-      await window.electronAPI.auth.signOut()
-    } catch {
-      // proceed anyway
-    }
-    // Disable auto-login on manual logout
-    try {
-      const s = await window.electronAPI.settings.get()
-      if (s.autoLogin) {
-        await window.electronAPI.settings.set({ ...s, autoLogin: false })
+  const handleLogout = useCallback(async (skipSignOut?: boolean) => {
+    if (!skipSignOut) {
+      try {
+        await window.electronAPI.auth.signOut()
+      } catch {
+        // proceed anyway
       }
-    } catch { /* */ }
-    // Stop health check + sidecar
+      // Disable auto-login on manual logout
+      try {
+        const s = await window.electronAPI.settings.get()
+        if (s.autoLogin) {
+          await window.electronAPI.settings.set({ ...s, autoLogin: false })
+        }
+      } catch { /* */ }
+    }
+    posthog.capture('user_logged_out', { reason: skipSignOut ? 'session_expired' : 'manual' })
+    posthog.reset()
+    // Stop session check + health check + sidecar
+    window.electronAPI.session.stopCheck()
     window.electronAPI.health.stop()
     if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }
     healthStarted.current = false
@@ -227,6 +273,7 @@ function App(): React.JSX.Element {
     setExitIp(null)
     setPage('login')
   }, [])
+  logoutRef.current = handleLogout
 
   const handlePlanClick = useCallback(() => {
     fetchSubscription()
@@ -311,6 +358,10 @@ function App(): React.JSX.Element {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {showOnboarding && (
+          <OnboardingModal onComplete={() => setShowOnboarding(false)} />
+        )}
       </div>
     </LocaleProvider>
   )

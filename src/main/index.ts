@@ -175,7 +175,7 @@ function fetchExitIpDirect(): Promise<string | null> {
 function fetchExitIpViaProxy(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:8080`, 'https://icanhazip.com'],
+    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', 'http://127.0.0.1:8080', 'https://icanhazip.com'],
       (err, stdout) => {
         if (err) { resolve(null); return }
         resolve(stdout.trim() || null)
@@ -254,10 +254,12 @@ ipcMain.handle('check-proxy-ip', async () => {
 // --- Periodic health check (every 60s) ---
 let healthInterval: ReturnType<typeof setInterval> | null = null
 let healthRunning = false
+let healthNotified = false // only notify once per outage
 
 function startHealthCheck(): void {
   if (healthInterval) return
   healthRunning = true
+  healthNotified = false
   healthInterval = setInterval(async () => {
     if (!healthRunning) return
     // Only OK if sidecar is running AND proxy exit IP is reachable
@@ -270,21 +272,8 @@ function startHealthCheck(): void {
         win.webContents.send('network-health', { ok, ip })
       }
     }
-    // If down: show notification + bring window to front
-    if (!ok) {
-      const win = BrowserWindow.getAllWindows()[0]
-      if (win && !win.isDestroyed()) {
-        if (win.isMinimized()) win.restore()
-        win.focus()
-      }
-      const { Notification } = await import('electron')
-      if (Notification.isSupported()) {
-        new Notification({
-          title: 'OriginAI',
-          body: 'Network connection lost. Please check your proxy.',
-          icon
-        }).show()
-      }
+    if (ok) {
+      healthNotified = false // reset so next outage triggers notification
     }
   }, 60_000)
 }
@@ -299,6 +288,47 @@ function stopHealthCheck(): void {
 
 ipcMain.handle('health:start', () => { startHealthCheck(); return { ok: true } })
 ipcMain.handle('health:stop', () => { stopHealthCheck(); return { ok: true } })
+
+// ── Session validity check (detect kicked-out sessions) ──
+
+let sessionCheckInterval: ReturnType<typeof setInterval> | null = null
+
+function startSessionCheck(): void {
+  if (sessionCheckInterval) return
+  sessionCheckInterval = setInterval(async () => {
+    // Only check if we have an active session
+    if (sessionCookies.length === 0) return
+    try {
+      const res = await authFetch('GET', '/api/auth/get-session')
+      if (res.status === 401 || res.status === 403) {
+        console.log('[session] Session invalidated (status:', res.status, ') — forcing logout')
+        // Clear local session
+        sessionCookies = []
+        sessionUser = undefined
+        clearSession()
+        // Notify renderer
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) {
+            win.webContents.send('session:expired')
+          }
+        }
+        stopSessionCheck()
+      }
+    } catch {
+      // Network error — don't logout, just skip
+    }
+  }, 30_000) // Check every 30 seconds
+}
+
+function stopSessionCheck(): void {
+  if (sessionCheckInterval) {
+    clearInterval(sessionCheckInterval)
+    sessionCheckInterval = null
+  }
+}
+
+ipcMain.handle('session:start-check', () => { startSessionCheck(); return { ok: true } })
+ipcMain.handle('session:stop-check', () => { stopSessionCheck(); return { ok: true } })
 
 // Detect system HTTP proxy
 ipcMain.handle('detect-system-proxy', async () => {
@@ -366,6 +396,9 @@ ipcMain.handle('auth:check-username', async (_e, username: string) => {
 })
 
 ipcMain.handle('auth:sign-in', async (_e, email: string, password: string, turnstileToken?: string) => {
+  // Clear old session to avoid stale emailVerified state
+  sessionCookies = []
+  sessionUser = undefined
   const res = await authFetch('POST', '/api/auth/sign-in/email', { email, password, turnstileToken })
   if (res.status === 200) {
     const data = res.data as { user?: { email: string; name: string } }
@@ -387,6 +420,14 @@ ipcMain.handle('auth:verify-email', async (_e, email: string, otp: string) => {
 
 ipcMain.handle('auth:get-session', async () => {
   return authFetch('GET', '/api/auth/get-session')
+})
+
+ipcMain.handle('auth:get-newuser', async () => {
+  return authFetch('GET', '/api/auth/is-newuser')
+})
+
+ipcMain.handle('auth:set-newuser', async (_e, value: number) => {
+  return authFetch('POST', '/api/auth/is-newuser', { value })
 })
 
 ipcMain.handle('auth:reset-password', async (_e, email: string, otp: string, newPassword: string) => {
@@ -502,6 +543,60 @@ ipcMain.handle('claude-account:listen-email', async (_e, email?: string) => {
   const res = await authFetch('POST', '/api/claude-account/listen-email', email ? { email } : {})
   console.log('[listen-email] status:', res.status, 'data:', JSON.stringify(res.data, null, 2))
   return res
+})
+
+// Ticket system IPC handlers
+const TICKET_API = 'https://api.ticket.originai.cc'
+
+async function ticketFetch(
+  method: string,
+  path: string,
+  userId: string,
+  userName: string,
+  body?: Record<string, unknown>
+): Promise<{ status: number; data: unknown }> {
+  const url = `${TICKET_API}${path}`
+  console.log(`[ticket] ${method} ${url}`)
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId,
+    'X-User-Name': encodeURIComponent(userName || 'Anonymous'),
+  }
+  try {
+    const resp = await net.fetch(url, {
+      method,
+      headers,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+    const text = await resp.text()
+    let data: unknown
+    try { data = JSON.parse(text) } catch { data = text }
+    console.log(`[ticket] ${method} ${path} → ${resp.status}`)
+    return { status: resp.status, data }
+  } catch (err) {
+    console.error(`[ticket] ${method} ${path} FAILED:`, err)
+    return { status: 0, data: { error: String(err) } }
+  }
+}
+
+ipcMain.handle('ticket:list', async (_e, userId: string, userName: string, params: string) => {
+  return ticketFetch('GET', `/api/tickets?${params}`, userId, userName)
+})
+
+ipcMain.handle('ticket:detail', async (_e, userId: string, userName: string, ticketId: string) => {
+  return ticketFetch('GET', `/api/tickets/${ticketId}`, userId, userName)
+})
+
+ipcMain.handle('ticket:create', async (_e, userId: string, userName: string, body: Record<string, unknown>) => {
+  return ticketFetch('POST', '/api/tickets', userId, userName, body)
+})
+
+ipcMain.handle('ticket:timeline', async (_e, userId: string, userName: string, ticketId: string) => {
+  return ticketFetch('GET', `/api/tickets/${ticketId}/timeline`, userId, userName)
+})
+
+ipcMain.handle('ticket:comment', async (_e, userId: string, userName: string, ticketId: string, content: string) => {
+  return ticketFetch('POST', `/api/tickets/${ticketId}/comments`, userId, userName, { content })
 })
 
 // Sidecar IPC handlers
@@ -636,11 +731,11 @@ function setupAutoUpdater(): void {
     broadcast('updater:status', { status: 'error', message: String(err) })
   })
 
-  // Check now, then every 12 hours
+  // Check now, then every hour
   autoUpdater.checkForUpdates().catch(() => { })
   setInterval(() => {
     autoUpdater.checkForUpdates().catch(() => { })
-  }, 12 * 60 * 60 * 1000)
+  }, 60 * 60 * 1000)
 }
 
 function broadcast(channel: string, data: unknown): void {
@@ -681,23 +776,13 @@ app.whenReady().then(() => {
     setupAutoUpdater()
   }
 
-  // Monitor sidecar crashes — immediately notify renderer
+  // Monitor sidecar crashes — notify renderer (don't steal focus)
   onSidecarCrash((reason) => {
-
+    console.log('[xray] crash:', reason)
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
         win.webContents.send('network-health', { ok: false, ip: null })
-        if (win.isMinimized()) win.restore()
-        win.focus()
       }
-    }
-    const { Notification: ElectronNotification } = require('electron')
-    if (ElectronNotification.isSupported()) {
-      new ElectronNotification({
-        title: 'OriginAI',
-        body: `Proxy service crashed: ${reason}`,
-        icon
-      }).show()
     }
   })
 

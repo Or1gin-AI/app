@@ -21,6 +21,7 @@ const REMOTE = {
 }
 
 let sidecarProcess: ChildProcess | null = null
+let sidecarStopping = false // true when intentionally stopping
 
 function getSidecarBinary(): string {
   const isPackaged = app.isPackaged
@@ -157,6 +158,7 @@ function probePort(port: number): Promise<boolean> {
 
 export async function startSidecar(proxyPassword: string, preProxy?: string): Promise<{ ok: boolean; error?: string }> {
   await stopSidecar()
+  sidecarStopping = false
 
   let config: object
   if (preProxy === 'direct') {
@@ -226,16 +228,17 @@ export async function startSidecar(proxyPassword: string, preProxy?: string): Pr
       sidecarProcess.on('error', (err) => {
         if (!resolved) {
           done({ ok: false, error: err.message })
-        } else {
+        } else if (!sidecarStopping) {
           sidecarProcess = null
           onCrashCallback?.(`Xray error: ${err.message}`)
         }
       })
       sidecarProcess.on('exit', (code) => {
-        sidecarProcess = null
         if (!resolved) {
+          sidecarProcess = null
           done({ ok: false, error: `Xray exited with code ${code}` })
-        } else {
+        } else if (!sidecarStopping) {
+          sidecarProcess = null
           onCrashCallback?.(`Xray exited with code ${code}`)
         }
       })
@@ -274,6 +277,7 @@ export function verifySidecar(): Promise<{ ok: boolean; ip?: string; error?: str
 
 export async function stopSidecar(): Promise<void> {
   if (sidecarProcess) {
+    sidecarStopping = true
     const proc = sidecarProcess
     sidecarProcess = null
     proc.kill('SIGTERM')
@@ -319,10 +323,12 @@ export async function updateOutboundPassword(password: string): Promise<{ ok: bo
 /** Kill any orphaned xray processes left from a previous crash */
 export function killOrphanedSidecar(): void {
   try {
+    const binary = getSidecarBinary()
     if (process.platform === 'win32') {
       execFile('taskkill', ['/F', '/IM', 'xray.exe'], () => {})
     } else {
-      execFile('pkill', ['-f', 'xray'], () => {})
+      // Only kill our specific xray binary, not other processes
+      execFile('pkill', ['-f', binary], () => {})
     }
   } catch { /* best effort */ }
 }
@@ -378,6 +384,11 @@ export async function setSystemProxy(): Promise<void> {
       'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
       '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', pacUrl, '/f'
     ])
+  } else if (process.platform === 'linux') {
+    // GNOME-based desktops
+    const pacUrl = `file://${pacPath}`
+    await run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'auto']).catch(() => {})
+    await run('gsettings', ['set', 'org.gnome.system.proxy', 'autoconfig-url', pacUrl]).catch(() => {})
   }
 }
 
@@ -394,6 +405,8 @@ export async function clearSystemProxy(): Promise<void> {
       'delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
       '/v', 'AutoConfigURL', '/f'
     ]).catch(() => { /* key may not exist */ })
+  } else if (process.platform === 'linux') {
+    await run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'none']).catch(() => {})
   }
   clearShellProxy()
 }

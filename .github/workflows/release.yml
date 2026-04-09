@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+env:
+  VITE_PUBLIC_POSTHOG_PROJECT_TOKEN: ${{ secrets.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN }}
+  VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
+
 jobs:
   build-mac:
     runs-on: macos-latest
@@ -27,6 +31,11 @@ jobs:
 
       - name: Download latest Xray (macOS)
         run: bash scripts/download-xray.sh darwin
+
+      - name: Write .env
+        run: |
+          echo "VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=${VITE_PUBLIC_POSTHOG_PROJECT_TOKEN}" >> .env
+          echo "VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}" >> .env
 
       - run: pnpm build
 
@@ -60,9 +69,46 @@ jobs:
         shell: bash
         run: bash scripts/download-xray.sh win32
 
+      - name: Write .env
+        shell: bash
+        run: |
+          echo "VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=${VITE_PUBLIC_POSTHOG_PROJECT_TOKEN}" >> .env
+          echo "VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}" >> .env
+
       - run: pnpm build
 
       - name: Build Electron (Windows)
         run: pnpm exec electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download latest Xray (Linux)
+        run: bash scripts/download-xray.sh linux
+
+      - name: Write .env
+        run: |
+          echo "VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=${VITE_PUBLIC_POSTHOG_PROJECT_TOKEN}" >> .env
+          echo "VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}" >> .env
+
+      - run: pnpm build
+
+      - name: Build Electron (Linux)
+        run: pnpm exec electron-builder --linux --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

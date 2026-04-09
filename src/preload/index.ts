@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
+  appVersion: process.env.npm_package_version || require('../../package.json').version as string,
   checkIp: () => ipcRenderer.invoke('check-ip'),
   checkIpQuick: () => ipcRenderer.invoke('check-ip-quick'),
   checkLocalIp: () => ipcRenderer.invoke('check-local-ip'),
@@ -19,6 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyEmail: (email: string, otp: string) =>
       ipcRenderer.invoke('auth:verify-email', email, otp),
     getSession: () => ipcRenderer.invoke('auth:get-session'),
+    getNewuser: () => ipcRenderer.invoke('auth:get-newuser'),
+    setNewuser: (value: number) => ipcRenderer.invoke('auth:set-newuser', value),
     resetPassword: (email: string, otp: string, newPassword: string) =>
       ipcRenderer.invoke('auth:reset-password', email, otp, newPassword),
     profile: () => ipcRenderer.invoke('auth:profile'),
@@ -52,6 +55,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => ipcRenderer.invoke('claude-account:list'),
     listenEmail: (email?: string) => ipcRenderer.invoke('claude-account:listen-email', email),
   },
+  ticket: {
+    list: (userId: string, userName: string, params: string) =>
+      ipcRenderer.invoke('ticket:list', userId, userName, params),
+    detail: (userId: string, userName: string, ticketId: string) =>
+      ipcRenderer.invoke('ticket:detail', userId, userName, ticketId),
+    create: (userId: string, userName: string, body: Record<string, unknown>) =>
+      ipcRenderer.invoke('ticket:create', userId, userName, body),
+    timeline: (userId: string, userName: string, ticketId: string) =>
+      ipcRenderer.invoke('ticket:timeline', userId, userName, ticketId),
+    comment: (userId: string, userName: string, ticketId: string, content: string) =>
+      ipcRenderer.invoke('ticket:comment', userId, userName, ticketId, content),
+  },
   sidecar: {
     start: (preProxy?: string) => ipcRenderer.invoke('sidecar:start', preProxy),
     stop: () => ipcRenderer.invoke('sidecar:stop'),
@@ -67,6 +82,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       savedEmail: string
       savedPassword: string
     }) => ipcRenderer.invoke('settings:set', settings),
+  },
+  session: {
+    startCheck: () => ipcRenderer.invoke('session:start-check'),
+    stopCheck: () => ipcRenderer.invoke('session:stop-check'),
+    onExpired: (cb: () => void) => {
+      const handler = () => cb()
+      ipcRenderer.on('session:expired', handler)
+      return () => ipcRenderer.removeListener('session:expired', handler)
+    },
   },
   health: {
     start: () => ipcRenderer.invoke('health:start'),
