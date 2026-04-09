@@ -245,28 +245,24 @@ function App(): React.JSX.Element {
   }, [posthog])
 
   const handleLogout = useCallback(async (skipSignOut?: boolean) => {
-    if (!skipSignOut) {
-      try {
-        await window.electronAPI.auth.signOut()
-      } catch {
-        // proceed anyway
-      }
-      // Disable auto-login on manual logout
-      try {
-        const s = await window.electronAPI.settings.get()
-        if (s.autoLogin) {
-          await window.electronAPI.settings.set({ ...s, autoLogin: false })
+    try {
+      if (!skipSignOut) {
+        await window.electronAPI.auth.signOut().catch(() => {})
+        // Disable auto-login on manual logout
+        const s = await window.electronAPI.settings.get().catch(() => null)
+        if (s?.autoLogin) {
+          await window.electronAPI.settings.set({ ...s, autoLogin: false }).catch(() => {})
         }
-      } catch { /* */ }
-    }
-    posthog.capture('user_logged_out', { reason: skipSignOut ? 'session_expired' : 'manual' })
-    posthog.reset()
-    // Stop session check + health check + sidecar
-    window.electronAPI.session.stopCheck()
-    window.electronAPI.health.stop()
-    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }
-    healthStarted.current = false
-    await window.electronAPI.sidecar.stop().catch(() => {})
+      }
+      try { posthog.capture('user_logged_out', { reason: skipSignOut ? 'session_expired' : 'manual' }) } catch { /* */ }
+      try { posthog.reset() } catch { /* */ }
+      // Stop session check + health check + sidecar
+      try { window.electronAPI.session?.stopCheck?.() } catch { /* */ }
+      window.electronAPI.health.stop().catch(() => {})
+      if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }
+      healthStarted.current = false
+      await window.electronAPI.sidecar.stop().catch(() => {})
+    } catch { /* ensure we always reach the state reset below */ }
     setUserEmail('')
     setUserPlan('free')
     setNetworkOk(true)
