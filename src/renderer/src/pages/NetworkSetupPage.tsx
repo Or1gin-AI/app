@@ -42,7 +42,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   // Pre-proxy state
   const [preProxyHost, setPreProxyHost] = useState('127.0.0.1')
   const [preProxyPort, setPreProxyPort] = useState('7890')
-  const [lastProxyAddr, setLastProxyAddr] = useState('')
+  const [_lastProxyAddr, setLastProxyAddr] = useState('')
 
   // Detect IP on mount
   useEffect(() => {
@@ -85,6 +85,8 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     setStep(2)
     setProgress(70)
     const verifyResult = await window.electronAPI.sidecar.verify()
+    console.log('*************************************8')
+    console.log(verifyResult)
     if (!verifyResult.ok) {
       setOptimizeError(verifyResult.error || 'Connection verification failed')
       return

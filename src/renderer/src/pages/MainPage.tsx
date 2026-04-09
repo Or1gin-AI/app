@@ -5,63 +5,97 @@ interface MainPageProps {
   userName: string
 }
 
-type RequestStatus = 'idle' | 'polling' | 'success' | 'no-email' | 'error'
+// idle       → show "接收邮件"
+// checking   → loading spinner, fetching emails
+// no-email   → no valid email, 60s cooldown then back to idle
+// has-email  → email found (<5min), show "请求登录" + age + refresh
+// requesting → extracting magic link
+// success    → link opened
+type EmailPhase = 'idle' | 'checking' | 'no-email' | 'has-email' | 'requesting' | 'success'
 
 type EmailItem = { from: string; subject: string; body: string; date: string }
 
+/** Relative time label + color for the email age badge */
+function getEmailAge(
+  emailDate: string,
+  t: { emailJustNow: string; emailAgo: string }
+): { label: string; color: string } {
+  const diffMin = (Date.now() - new Date(emailDate).getTime()) / 60_000
+
+  if (diffMin < 1) return { label: t.emailJustNow, color: 'text-green-500' }
+  if (diffMin < 2) return { label: t.emailAgo.replace('{n}', '1'), color: 'text-green-500' }
+  if (diffMin < 3) return { label: t.emailAgo.replace('{n}', '2'), color: 'text-green-600' }
+  if (diffMin < 5) return { label: t.emailAgo.replace('{n}', '3'), color: 'text-lime-600' }
+  return { label: t.emailAgo.replace('{n}', String(Math.floor(diffMin))), color: 'text-yellow-500' }
+}
+
 export function MainPage({ userName }: MainPageProps) {
   const { t } = useLocale()
-  const [showModal, setShowModal] = useState(false)
-  const [cooldown, setCooldown] = useState(0) // seconds remaining
-  const [requestStatus, setRequestStatus] = useState<RequestStatus>('idle')
-  const [statusMessage, setStatusMessage] = useState('')
+  const [phase, setPhase] = useState<EmailPhase>('idle')
+  const [cooldown, setCooldown] = useState(0)
+  const [latestEmail, setLatestEmail] = useState<EmailItem | null>(null)
   const [copied, setCopied] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [, setTick] = useState(0)
   const busyRef = useRef(false)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Stop polling helper
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-  }, [])
-
-  // Cleanup on unmount
+  // Cleanup
   useEffect(() => {
-    return () => { stopPolling(); if (timerRef.current) clearInterval(timerRef.current) }
-  }, [stopPolling])
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (ageTickRef.current) clearInterval(ageTickRef.current)
+    }
+  }, [])
 
   // Countdown ticker
   useEffect(() => {
     if (cooldown <= 0) {
-      if (timerRef.current) clearInterval(timerRef.current)
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
       return
     }
     timerRef.current = setInterval(() => {
       setCooldown((prev) => {
         if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current)
+          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
           return 0
         }
         return prev - 1
       })
     }, 1000)
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null } }
   }, [cooldown > 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When cooldown expires during polling → no email received
+  // When cooldown expires → no-email goes back to idle; has-email auto re-fetches
   useEffect(() => {
-    if (cooldown <= 0 && requestStatus === 'polling') {
-      stopPolling()
-      setRequestStatus('no-email')
+    if (cooldown > 0) return
+    if (phase === 'no-email') {
+      setPhase('idle')
+    } else if (phase === 'has-email') {
+      fetchEmails()
     }
-  }, [cooldown, requestStatus, stopPolling])
+  }, [cooldown, phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Single poll attempt — returns true if login link found */
-  const pollOnce = useCallback(async (): Promise<boolean> => {
-    if (busyRef.current) return false
+  // Tick every 15s to update relative time when has-email
+  useEffect(() => {
+    if (!(phase === 'has-email' && latestEmail)) return
+    ageTickRef.current = setInterval(() => {
+      // If email is now older than 5 min, expire it
+      const diffMin = (Date.now() - new Date(latestEmail.date).getTime()) / 60_000
+      if (diffMin >= 5) {
+        setLatestEmail(null)
+        setPhase('idle')
+      }
+      setTick((n) => n + 1)
+    }, 15_000)
+    return () => { if (ageTickRef.current) { clearInterval(ageTickRef.current); ageTickRef.current = null } }
+  }, [phase, latestEmail])
+
+  /** Fetch emails from backend */
+  const fetchEmails = useCallback(async () => {
+    if (busyRef.current) return
     busyRef.current = true
+    setPhase('checking')
 
     try {
       let res = await window.electronAPI.claudeAccount.listenEmail()
@@ -76,50 +110,60 @@ export function MainPage({ userName }: MainPageProps) {
         }
       }
 
-      if (res.status < 200 || res.status >= 300) return false
+      if (res.status < 200 || res.status >= 300) {
+        setPhase('no-email')
+        setCooldown(60)
+        return
+      }
 
       const emails = res.data as EmailItem[]
-      if (!emails || emails.length === 0) return false
+      if (!emails || emails.length === 0) {
+        setPhase('no-email')
+        setCooldown(60)
+        return
+      }
 
-      // Dedicated Claude inbox — take the most recent email directly
       const latest = emails[0]
+      const diffMin = (Date.now() - new Date(latest.date).getTime()) / 60_000
 
-      // Extract the magic-link URL from body
-      const urls = latest.body.match(/https?:\/\/[^\s<>"')\]]+/g) || []
-      const magicLink = urls.find((u) => u.includes('magic-link')) || urls[0]
-      if (!magicLink) return false
+      if (diffMin >= 5) {
+        // Too old, treat as no email
+        setPhase('no-email')
+        setCooldown(60)
+        return
+      }
 
-      window.open(magicLink, '_blank')
-      setRequestStatus('success')
-      setStatusMessage('')
-
-      stopPolling()
-      setCooldown(0)
-      return true
+      setLatestEmail(latest)
+      setPhase('has-email')
     } catch {
-      return false // silent, keep polling
+      setPhase('no-email')
+      setCooldown(60)
     } finally {
       busyRef.current = false
     }
-  }, [stopPolling])
-
-  const handleRequestLogin = useCallback(() => {
-    setShowModal(true)
   }, [])
 
-  const handleModalConfirm = useCallback(async () => {
-    setShowModal(false)
-    setRequestStatus('polling')
-    setStatusMessage('')
-    setCooldown(120)
+  /** Refresh: stay in has-email but start cooldown, then auto re-fetch */
+  const handleRefresh = useCallback(() => {
+    setCooldown(60)
+  }, [])
 
-    // Immediate first poll
-    const found = await pollOnce()
-    if (found) return
+  /** Request login: extract magic link from the stored email */
+  const handleRequestLogin = useCallback(async () => {
+    if (!latestEmail) return
+    setPhase('requesting')
 
-    // Poll every 10s for the remaining duration
-    pollRef.current = setInterval(() => { pollOnce() }, 10_000)
-  }, [pollOnce])
+    const urls = latestEmail.body.match(/https?:\/\/[^\s<>"')\]]+/g) || []
+    const magicLink = urls.find((u) => u.includes('magic-link')) || urls[0]
+
+    if (!magicLink) {
+      setPhase('has-email')
+      return
+    }
+
+    window.open(magicLink, '_blank')
+    setPhase('success')
+  }, [latestEmail])
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -165,6 +209,121 @@ export function MainPage({ userName }: MainPageProps) {
     <>{t.main.claudeWeb.step3}</>,
   ]
 
+  // ── Render the action area based on phase ──
+
+  const renderActionArea = () => {
+    switch (phase) {
+      case 'idle':
+        return (
+          <button
+            onClick={fetchEmails}
+            className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+          >
+            {t.main.claudeWeb.fetchEmail}
+          </button>
+        )
+
+      case 'checking':
+        return (
+          <button
+            disabled
+            className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand/40 text-white/60 cursor-not-allowed"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              {t.main.claudeWeb.fetchingEmail}
+            </span>
+          </button>
+        )
+
+      case 'no-email':
+        return (
+          <>
+            <button
+              disabled
+              className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand/40 text-white/60 cursor-not-allowed"
+            >
+              {t.main.claudeWeb.fetchEmail}
+            </button>
+            <p className="text-xs text-amber-600 mt-2">{t.main.claudeWeb.noEmail}</p>
+            {cooldown > 0 && (
+              <p className="text-xs text-text-faint mt-1">
+                {t.main.claudeWeb.retryAfter.replace('{time}', formatTime(cooldown))}
+              </p>
+            )}
+          </>
+        )
+
+      case 'has-email': {
+        const age = latestEmail ? getEmailAge(latestEmail.date, t.main.claudeWeb) : null
+        const refreshing = cooldown > 0
+        return (
+          <>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={handleRequestLogin}
+                className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+              >
+                {t.main.claudeWeb.requestLogin}
+              </button>
+              {/* Refresh button */}
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className={`w-9 h-9 rounded-lg border border-border-strong flex items-center justify-center transition-colors ${
+                  refreshing ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-alt'
+                }`}
+                title="Refresh"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+              </button>
+            </div>
+            {age && (
+              <p className={`text-xs mt-2 ${age.color}`}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-current opacity-70 mr-1 align-middle" />
+                {t.main.claudeWeb.emailReceived} · {age.label}
+              </p>
+            )}
+            {refreshing && (
+              <p className="text-xs text-text-faint mt-1">
+                {t.main.claudeWeb.refreshWait.replace('{time}', formatTime(cooldown))}
+              </p>
+            )}
+          </>
+        )
+      }
+
+      case 'requesting':
+        return (
+          <button
+            disabled
+            className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand/40 text-white/60 cursor-not-allowed"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              {t.main.claudeWeb.requesting}
+            </span>
+          </button>
+        )
+
+      case 'success':
+        return (
+          <>
+            <button
+              onClick={() => { setPhase('idle'); setLatestEmail(null) }}
+              className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+            >
+              {t.main.claudeWeb.fetchEmail}
+            </button>
+            <p className="text-xs text-green-600 mt-2">{t.main.claudeWeb.success}</p>
+          </>
+        )
+    }
+  }
+
   return (
     <div className="flex flex-1 min-h-0 items-center">
       {/* Left: Claude Web / Desktop */}
@@ -194,40 +353,7 @@ export function MainPage({ userName }: MainPageProps) {
           </div>
 
           <div className="text-center">
-            <button
-              onClick={handleRequestLogin}
-              disabled={requestStatus === 'polling'}
-              className={`px-7 py-2.5 rounded-lg text-sm font-medium transition-opacity ${
-                requestStatus === 'polling'
-                  ? 'bg-brand/40 text-white/60 cursor-not-allowed'
-                  : 'bg-brand text-white cursor-pointer hover:opacity-90'
-              }`}
-            >
-              {requestStatus === 'polling' ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  {t.main.claudeWeb.requesting}
-                </span>
-              ) : (
-                t.main.claudeWeb.button
-              )}
-            </button>
-
-            {requestStatus === 'polling' && cooldown > 0 && (
-              <p className="text-xs text-text-faint mt-2">
-                {t.main.claudeWeb.retryAfter.replace('{time}', formatTime(cooldown))}
-              </p>
-            )}
-            {requestStatus === 'success' && (
-              <p className="text-xs text-green-600 mt-2">
-                {statusMessage || t.main.claudeWeb.success}
-              </p>
-            )}
-            {requestStatus === 'no-email' && (
-              <p className="text-xs text-amber-600 mt-2">
-                {t.main.claudeWeb.noEmail}
-              </p>
-            )}
+            {renderActionArea()}
           </div>
         </div>
       </div>
@@ -264,40 +390,6 @@ export function MainPage({ userName }: MainPageProps) {
           </div>
         </div>
       </div>
-
-      {/* Confirmation Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-bg rounded-xl border border-border shadow-lg w-[360px] p-6">
-            <h3 className="font-serif text-base text-text mb-2">{t.main.claudeWeb.modalTitle}</h3>
-            <p className="text-sm text-text-muted mb-4">{t.main.claudeWeb.modalDesc}</p>
-            <ul className="text-sm text-text-secondary mb-5 space-y-2">
-              <li className="flex items-start gap-2">
-                <span className="text-brand mt-0.5">✓</span>
-                <span>{t.main.claudeWeb.modalCheck1}</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-brand mt-0.5">✓</span>
-                <span>{t.main.claudeWeb.modalCheck2}</span>
-              </li>
-            </ul>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowModal(false)}
-                className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors"
-              >
-                {t.main.claudeWeb.modalCancel}
-              </button>
-              <button
-                onClick={handleModalConfirm}
-                className="flex-1 py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
-              >
-                {t.main.claudeWeb.modalConfirm}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

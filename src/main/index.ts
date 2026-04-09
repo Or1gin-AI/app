@@ -422,6 +422,12 @@ ipcMain.handle('detect-system-proxy', async () => {
         return { found: true, host: hostMatch[1].trim(), port: portMatch[1].trim() }
       }
     } else if (process.platform === 'win32') {
+      const enableOut = execSync(
+        'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable',
+        { encoding: 'utf-8' }
+      )
+      const enabled = /ProxyEnable\s+REG_DWORD\s+0x0*1/.test(enableOut)
+      if (!enabled) return { found: false }
       const out = execSync(
         'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer',
         { encoding: 'utf-8' }
@@ -731,7 +737,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   proxyCredentials = creds
   console.log('[proxy-auth] got credentials, expires:', creds.expireAt)
 
-  const result = await startSidecar('123456', preProxy) // TODO: restore creds.password after server gRPC is fixed
+  const result = await startSidecar(creds.password, preProxy)
   if (result.ok) {
     const pac = generatePacScript()
     for (const win of BrowserWindow.getAllWindows()) {
