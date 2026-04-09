@@ -115,35 +115,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-linux-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Download latest Xray (Linux)
-        run: bash scripts/download-xray.sh linux
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Write .env
-        run: |
-          echo "VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=${VITE_PUBLIC_POSTHOG_PROJECT_TOKEN}" >> .env
-          echo "VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}" >> .env
-
-      - run: pnpm build
-
-      - name: Build Electron (Linux arm64)
-        run: pnpm exec electron-builder --linux --arm64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # NOTE: Linux arm64 build disabled — app-builder-bin does not ship a working arm64 binary yet.
+  # Re-enable when electron-builder supports it. See: https://github.com/electron-userland/electron-builder/issues/8292
