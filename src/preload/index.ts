@@ -15,10 +15,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('auth:check-username', username),
     signIn: (email: string, password: string, turnstileToken?: string) =>
       ipcRenderer.invoke('auth:sign-in', email, password, turnstileToken),
-    sendOtp: (email: string, type: string) =>
-      ipcRenderer.invoke('auth:send-otp', email, type),
-    verifyEmail: (email: string, otp: string) =>
-      ipcRenderer.invoke('auth:verify-email', email, otp),
+    sendOtp: (email: string, type: string, turnstileToken?: string) =>
+      ipcRenderer.invoke('auth:send-otp', email, type, turnstileToken),
+    verifyEmail: (email: string, otp: string, turnstileToken?: string) =>
+      ipcRenderer.invoke('auth:verify-email', email, otp, turnstileToken),
     getSession: () => ipcRenderer.invoke('auth:get-session'),
     getNewuser: () => ipcRenderer.invoke('auth:get-newuser'),
     setNewuser: (value: number) => ipcRenderer.invoke('auth:set-newuser', value),
@@ -71,7 +71,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     start: (preProxy?: string) => ipcRenderer.invoke('sidecar:start', preProxy),
     stop: () => ipcRenderer.invoke('sidecar:stop'),
     status: () => ipcRenderer.invoke('sidecar:status'),
-    verify: () => ipcRenderer.invoke('sidecar:verify')
+    verify: () => ipcRenderer.invoke('sidecar:verify'),
+    pacStatus: () => ipcRenderer.invoke('sidecar:pac-status')
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

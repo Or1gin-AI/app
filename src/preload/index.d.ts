@@ -30,8 +30,8 @@ declare global {
         signUp: (username: string, email: string, password: string, turnstileToken?: string) => Promise<AuthResponse>
         checkUsername: (username: string) => Promise<AuthResponse>
         signIn: (email: string, password: string, turnstileToken?: string) => Promise<AuthResponse>
-        sendOtp: (email: string, type: string) => Promise<AuthResponse>
-        verifyEmail: (email: string, otp: string) => Promise<AuthResponse>
+        sendOtp: (email: string, type: string, turnstileToken?: string) => Promise<AuthResponse>
+        verifyEmail: (email: string, otp: string, turnstileToken?: string) => Promise<AuthResponse>
         getSession: () => Promise<AuthResponse>
         getNewuser: () => Promise<AuthResponse>
         setNewuser: (value: number) => Promise<AuthResponse>
@@ -89,6 +89,7 @@ declare global {
         stop: () => Promise<{ ok: boolean }>
         status: () => Promise<{ running: boolean }>
         verify: () => Promise<{ ok: boolean; ip?: string; error?: string }>
+        pacStatus: () => Promise<{ running: boolean }>
       }
       session: {
         startCheck: () => Promise<{ ok: boolean }>

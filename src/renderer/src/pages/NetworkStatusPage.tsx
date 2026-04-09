@@ -14,21 +14,23 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
   const [localIp, setLocalIp] = useState<string | null>(null)
   const [proxyIp, setProxyIp] = useState<string | null>(null)
   const [proxyOk, setProxyOk] = useState(false)
+  const [pacOk, setPacOk] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     async function check() {
-      // Fetch local IP (direct to VPS) and proxy IP (curl through proxy) in parallel
-      const [directRes, proxyRes] = await Promise.all([
+      const [directRes, proxyRes, pacRes] = await Promise.all([
         window.electronAPI.checkLocalIp(),
-        window.electronAPI.checkProxyIp()
+        window.electronAPI.checkProxyIp(),
+        window.electronAPI.sidecar.pacStatus()
       ])
 
       if (cancelled) return
       setLocalIp(directRes.ip)
       setProxyIp(proxyRes.ip)
       setProxyOk(proxyRes.ok)
+      setPacOk(pacRes.running)
       setLoading(false)
     }
 
@@ -64,6 +66,12 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
             <span className="text-text-faint text-[11px]">{t.networkStatus.proxyStatus}</span>
             <span className={proxyOk ? 'text-green-600' : 'text-red-500'}>
               {proxyOk ? t.networkStatus.running : t.networkStatus.stopped}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-text-faint text-[11px]">{t.networkStatus.pacStatus}</span>
+            <span className={pacOk ? 'text-green-600' : 'text-red-500'}>
+              {pacOk ? t.networkStatus.running : t.networkStatus.stopped}
             </span>
           </div>
           <div className="border-t border-border" />

@@ -230,6 +230,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [name, setName] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [otp, setOtp] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
 
@@ -356,10 +357,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         const errData = res.data as { message?: string; code?: string } | undefined
         const msg = typeof errData === 'object' && errData?.message ? errData.message.toLowerCase() : ''
         if (msg.includes('email') && msg.includes('verif')) {
-          // Genuinely unverified email
+          // Genuinely unverified email — don't auto-send OTP here,
+          // Turnstile token is spent. User can resend after new Turnstile loads on OTP page.
           setError(t.login.errorEmailNotVerified)
+          setTurnstileToken(null)
+          setOtpSent(false)
           setView('otp')
-          await window.electronAPI.auth.sendOtp(email, 'email-verification')
         } else {
           // Turnstile failure or other 403
           setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorSignInFailed)
@@ -387,7 +390,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
     setLoading(true)
     try {
-      await window.electronAPI.auth.sendOtp(email, 'forget-password')
+      const otpRes = await window.electronAPI.auth.sendOtp(email, 'forget-password', turnstileToken || undefined)
+      if (otpRes.status >= 400) {
+        const otpErr = otpRes.data as { message?: string } | undefined
+        setError(typeof otpErr === 'object' && otpErr?.message ? otpErr.message : t.login.forgetFailed)
+        return
+      }
       setMessage(t.login.forgetSent)
       setOtp('')
       setNewPassword('')
@@ -440,8 +448,10 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       const res = await window.electronAPI.auth.signUp(name, email, password, turnstileToken || undefined)
       if (res.status === 200) {
-        await window.electronAPI.auth.sendOtp(email, 'email-verification')
+        // Backend already sends OTP on sign-up, no need to call sendOtp again
         setMessage(t.login.registerSuccess)
+        setTurnstileToken(null)
+        setOtpSent(true) // backend already sent OTP on sign-up
         setView('otp')
       } else {
         const data = res.data as { message?: string }
@@ -460,7 +470,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     if (code.length !== 6) return
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.verifyEmail(email, code)
+      const res = await window.electronAPI.auth.verifyEmail(email, code, turnstileToken || undefined)
       if (res.status === 200) {
         setMessage(t.login.otpSuccess)
         setOtp('')
@@ -479,10 +489,35 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     clearMessages()
     setLoading(true)
     try {
-      await window.electronAPI.auth.sendOtp(email, 'email-verification')
-      setMessage(t.login.otpResent)
+      const res = await window.electronAPI.auth.sendOtp(email, 'email-verification', turnstileToken || undefined)
+      if (res.status >= 400) {
+        const errData = res.data as { message?: string } | undefined
+        setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorOtpFailed)
+      } else {
+        setMessage(t.login.otpResent)
+      }
     } catch {
-      // silent
+      setError(t.login.errorOtpFailed)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSendInitialOtp = async () => {
+    clearMessages()
+    setLoading(true)
+    try {
+      const res = await window.electronAPI.auth.sendOtp(email, 'email-verification', turnstileToken || undefined)
+      if (res.status >= 400) {
+        const errData = res.data as { message?: string } | undefined
+        setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorOtpFailed)
+      } else {
+        setMessage(t.login.otpResent)
+        setOtpSent(true)
+        setTurnstileToken(null) // reset for verify step
+      }
+    } catch {
+      setError(t.login.errorOtpFailed)
     } finally {
       setLoading(false)
     }
@@ -747,31 +782,52 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 {t.login.otpSubtitle} <span className="text-brand">{email}</span>
               </p>
 
-              <div className="mb-6">
-                <OtpInput value={otp} onChange={setOtp} onComplete={handleVerifyOtp} />
-              </div>
+              {!otpSent ? (
+                <>
+                  {/* Phase 1: Turnstile + send button */}
+                  <Turnstile onToken={handleTurnstileToken} />
 
-              <button
-                onClick={handleVerifyOtp}
-                disabled={loading || otp.replace(/[^0-9]/g, '').length !== 6}
-                className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? '...' : t.login.otpSubmit}
-              </button>
+                  <button
+                    onClick={handleSendInitialOtp}
+                    disabled={loading || !turnstileToken}
+                    className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? '...' : t.login.otpSend}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Phase 2: OTP input + verify */}
+                  <div className="mb-6">
+                    <OtpInput value={otp} onChange={setOtp} onComplete={handleVerifyOtp} />
+                  </div>
 
-              <div className="flex justify-between items-center text-[13px]">
+                  <Turnstile onToken={handleTurnstileToken} />
+
+                  <button
+                    onClick={handleVerifyOtp}
+                    disabled={loading || otp.replace(/[^0-9]/g, '').length !== 6 || !turnstileToken}
+                    className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? '...' : t.login.otpSubmit}
+                  </button>
+
+                  <button
+                    onClick={handleResendOtp}
+                    disabled={loading}
+                    className="text-brand underline cursor-pointer bg-transparent border-none text-[13px] disabled:opacity-50"
+                  >
+                    {t.login.otpResend}
+                  </button>
+                </>
+              )}
+
+              <div className="mt-4 text-center">
                 <button
                   onClick={switchToLogin}
                   className="text-text-muted hover:text-text-secondary cursor-pointer bg-transparent border-none text-[13px]"
                 >
                   {t.login.backToLogin}
-                </button>
-                <button
-                  onClick={handleResendOtp}
-                  disabled={loading}
-                  className="text-brand underline cursor-pointer bg-transparent border-none text-[13px] disabled:opacity-50"
-                >
-                  {t.login.otpResend}
                 </button>
               </div>
             </>

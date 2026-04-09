@@ -1,6 +1,6 @@
 {
   "name": "originai-app",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OriginAI Desktop Client",
   "main": "./out/main/index.js",
   "author": {
