@@ -2,3 +2,10 @@ node_modules
 out
 dist
 .superpowers
+.DS_Store
+
+# Xray binaries & geo data (downloaded by scripts/download-xray.sh)
+resources/sidecar/*/xray
+resources/sidecar/*/xray.exe
+resources/sidecar/*/geoip.dat
+resources/sidecar/*/geosite.dat
