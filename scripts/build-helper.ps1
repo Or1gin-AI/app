@@ -12,9 +12,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $HelperDir = Join-Path $ScriptDir "..\resources\helper"
 $SidecarDir = Join-Path $ScriptDir "..\resources\sidecar"
 
-# No network calls — pure stdlib, no external deps
-$env:GOPROXY = "off"
+# No external module deps — only allow toolchain downloads
 $env:GONOSUMCHECK = "*"
+$env:GOFLAGS = "-mod=mod"
 
 Push-Location $HelperDir
 
@@ -56,8 +56,8 @@ if ($Filter -eq "all" -or $Filter -eq "linux") {
 # Clean env vars
 Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
 Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
-Remove-Item Env:\GOPROXY -ErrorAction SilentlyContinue
 Remove-Item Env:\GONOSUMCHECK -ErrorAction SilentlyContinue
+Remove-Item Env:\GOFLAGS -ErrorAction SilentlyContinue
 
 Pop-Location
 
