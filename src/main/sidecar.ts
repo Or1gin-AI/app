@@ -100,19 +100,19 @@ function generateConfig(
 
   if (usePreProxy) {
     outbounds.push(
+      { tag: 'direct', protocol: 'freedom' },
       proxyOutbound,
       {
         tag: 'pre-proxy',
         protocol: preProxyProtocol,
         settings: preProxySettings,
       },
-      { tag: 'direct', protocol: 'freedom' },
       { tag: 'block', protocol: 'blackhole' },
     )
   } else {
     outbounds.push(
-      proxyOutbound,
       { tag: 'direct', protocol: 'freedom' },
+      proxyOutbound,
       { tag: 'block', protocol: 'blackhole' },
     )
   }
@@ -120,18 +120,41 @@ function generateConfig(
   const routingRules: Record<string, unknown>[] = [
     {
       type: 'field',
-      outboundTag: 'direct',
-      domain: ['geosite:cn'],
-    },
-    {
-      type: 'field',
-      outboundTag: 'direct',
-      ip: ['geoip:cn', 'geoip:private'],
-    },
-    {
-      type: 'field',
       outboundTag: 'proxy',
-      network: 'tcp,udp',
+      domain: [
+        'domain:anthropic.com',
+        'domain:anthropic.co',
+        'domain:claude.ai',
+        'domain:claude.com',
+        'domain:claudeusercontent.com',
+        'domain:storage.googleapis.com',
+        'domain:datadoghq.com',
+        'domain:datadog.com',
+        'domain:ddog-gov.com',
+        'domain:datadoghq.eu',
+        'domain:browser-intake-us5-datadoghq.com',
+        'domain:browser-intake-datadoghq.com',
+        'domain:browser-intake-us3-datadoghq.com',
+        'domain:browser-intake-us1-datadoghq.com',
+        'domain:sentry.io',
+        'domain:statsigapi.net',
+        'domain:statsig.com',
+        'domain:segment.io',
+        'domain:growthbook.io',
+        'domain:split.io',
+        'domain:intellimize.co',
+        'domain:intercom.io',
+        'domain:intercomcdn.com',
+        'domain:facebook.net',
+        'domain:ipify.org',
+        'regexp:.*anthropic.*',
+        'regexp:.*claude.*',
+        'regexp:.*datadog.*',
+        'regexp:.*ddog.*',
+        'regexp:.*sentry.*',
+        'regexp:.*statsig.*',
+        'regexp:.*intercom.*',
+      ],
     },
   ]
 
@@ -154,7 +177,7 @@ function generateConfig(
     ],
     outbounds,
     routing: {
-      domainStrategy: 'IPIfNonMatch',
+      domainStrategy: 'AsIs',
       rules: routingRules,
     },
   }
@@ -173,28 +196,11 @@ function probePort(port: number): Promise<boolean> {
   })
 }
 
-export async function startSidecar(proxyPassword: string, preProxy?: string): Promise<{ ok: boolean; error?: string }> {
+export async function startSidecar(proxyPassword: string, _preProxy?: string): Promise<{ ok: boolean; error?: string }> {
   await stopSidecar()
   sidecarStopping = false
 
-  let config: object
-  if (preProxy === 'direct') {
-    config = generateConfig(proxyPassword)
-  } else {
-    const proxy = preProxy || DEFAULT_PRE_PROXY
-    const [host, portStr] = proxy.split(':')
-    const port = parseInt(portStr, 10) || 7890
-    // Safety: reject if upstream points to our own port (would cause infinite loop)
-    if (port === LOCAL_PORT) {
-      return { ok: false, error: `Upstream proxy port ${port} conflicts with local proxy port` }
-    }
-    const protocolProbe = await probePreProxy(host, port)
-    if (!protocolProbe.ok || !protocolProbe.protocol) {
-      return { ok: false, error: protocolProbe.error || `Cannot detect proxy protocol for ${proxy}` }
-    }
-    console.log(`[proxy] using upstream ${protocolProbe.protocol.toUpperCase()} proxy: ${proxy}`)
-    config = generateConfig(proxyPassword, host, port, protocolProbe.protocol)
-  }
+  const config = generateConfig(proxyPassword)
   const configDir = getConfigDir()
   const configPath = join(configDir, 'config.json')
   writeFileSync(configPath, JSON.stringify(config, null, 2))
@@ -365,25 +371,8 @@ export function isSidecarRunning(): boolean {
 export async function updateOutboundPassword(password: string): Promise<{ ok: boolean; error?: string }> {
   if (!isSidecarRunning()) return { ok: false, error: 'Xray not running' }
 
-  const configDir = getConfigDir()
-  const configPath = join(configDir, 'config.json')
-
-  // Read current config to preserve preProxy settings
-  let preProxy: string | undefined
-  try {
-    const cfg = JSON.parse(readFileSync(configPath, 'utf-8'))
-    const preProxyOut = cfg.outbounds?.find((o: { tag: string }) => o.tag === 'pre-proxy')
-    const settings = preProxyOut?.settings
-    if (settings?.address && settings?.port) {
-      preProxy = `${settings.address}:${settings.port}`
-    } else if (settings?.servers?.[0]) {
-      const s = settings.servers[0]
-      preProxy = `${s.address}:${s.port}`
-    }
-  } catch { /* use direct */ }
-
   console.log('[xray] updating password, restarting...')
-  return startSidecar(password, preProxy || 'direct')
+  return startSidecar(password)
 }
 
 /** Kill any orphaned xray processes left from a previous crash */

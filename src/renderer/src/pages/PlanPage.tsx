@@ -74,6 +74,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   const [checkoutLoading, setCheckoutLoading] = useState<'stripe' | 'crypto' | null>(null)
   const [showTickets, setShowTickets] = useState(false)
   const cleanupRef = useRef<(() => void) | null>(null)
+  const refreshTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
   // Activation balance
   const [activationBalance, setActivationBalance] = useState<number | null>(null)
@@ -87,11 +88,21 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
     }).catch(() => {})
   }, [])
 
-  useEffect(() => {
+  const clearRefreshTimers = useCallback(() => {
+    for (const timer of refreshTimersRef.current) clearTimeout(timer)
+    refreshTimersRef.current = []
+  }, [])
+
+  const refreshPlanState = useCallback(() => {
     refreshBalance()
-    const interval = setInterval(() => { refreshBalance(); onRefresh() }, 5000)
+    void onRefresh()
+  }, [onRefresh, refreshBalance])
+
+  useEffect(() => {
+    refreshPlanState()
+    const interval = setInterval(() => { refreshPlanState() }, 3000)
     return () => clearInterval(interval)
-  }, [refreshBalance, onRefresh])
+  }, [refreshPlanState])
 
   const handleBuyActivation = () => {
     setModal({ step: 'payment', target: 'activation' as PlanId })
@@ -129,6 +140,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   }, [])
 
   useEffect(() => () => stopSmsPoll(), [stopSmsPoll])
+  useEffect(() => () => clearRefreshTimers(), [clearRefreshTimers])
 
   const startSmsPoll = useCallback(() => {
     stopSmsPoll()
@@ -295,13 +307,19 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   useEffect(() => {
     cleanupRef.current = window.electronAPI.payment.onCheckoutClosed(() => {
       setModal(null)
-      onRefresh()
-      refreshBalance()
+      refreshPlanState()
+      clearRefreshTimers()
+      for (const delay of [1500, 4000, 8000]) {
+        refreshTimersRef.current.push(setTimeout(() => {
+          refreshPlanState()
+        }, delay))
+      }
     })
     return () => {
+      clearRefreshTimers()
       if (cleanupRef.current) cleanupRef.current()
     }
-  }, [onRefresh])
+  }, [clearRefreshTimers, refreshPlanState])
 
   const currentIdx = PLAN_ORDER.indexOf(currentPlan)
 

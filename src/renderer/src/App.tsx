@@ -87,6 +87,9 @@ function App(): React.JSX.Element {
   const [networkOk, setNetworkOk] = useState(true)
   const [exitIp, setExitIp] = useState<string | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
+  const userPlanRef = useRef<PlanId>('free')
+  const planGateRef = useRef(false)
+  const subscriptionRoutingRef = useRef(false)
 
   // Auto-update state
   const [updateStatus, setUpdateStatus] = useState<string>('')
@@ -116,10 +119,39 @@ function App(): React.JSX.Element {
     return cleanup
   }, [])
 
+  useEffect(() => {
+    userPlanRef.current = userPlan
+  }, [userPlan])
+
+  const fetchIsNewUser = useCallback(async (): Promise<boolean> => {
+    const nuRes = await window.electronAPI.auth.getNewuser().catch(() => null)
+    return Boolean(
+      nuRes &&
+      nuRes.status === 200 &&
+      (nuRes.data as { isNewuser?: number })?.isNewuser === 1
+    )
+  }, [])
+
+  const routeSubscribedUser = useCallback(async () => {
+    if (subscriptionRoutingRef.current) return
+    subscriptionRoutingRef.current = true
+    try {
+      const isNew = await fetchIsNewUser()
+      if (isNew) setShowOnboarding(true)
+      setPage('network')
+    } finally {
+      subscriptionRoutingRef.current = false
+    }
+  }, [fetchIsNewUser])
+
   // Fetch subscription status from claude-account/list — returns resolved plan
   const fetchSubscription = useCallback(async (): Promise<PlanId> => {
     try {
       const res = await window.electronAPI.claudeAccount.list()
+      if (res.status === 401 || res.status === 403) {
+        logoutRef.current?.(true)
+        return 'free'
+      }
       if (res.status === 200) {
         const accounts = res.data as Array<{
           id: string
@@ -128,18 +160,23 @@ function App(): React.JSX.Element {
           status: string
           currentOrder: string | null
         }>
-        if (accounts.length > 0) {
-          const acct = accounts[0]
-          setClaudeAccountId(acct.id)
-          setAccountStatus(acct.status || 'OK')
-          const plan = PRODUCT_TO_PLAN[acct.subscriptionType] || 'free'
-          setUserPlan(plan)
-          setPlanExpires(acct.expireAt ? acct.expireAt.split('T')[0] : '')
-          return plan
+        if (accounts.length === 0) {
+          setClaudeAccountId('')
+          setAccountStatus('UNREGISTERED')
+          setUserPlan('free')
+          setPlanExpires('')
+          return 'free'
         }
+        const acct = accounts[0]
+        setClaudeAccountId(acct.id)
+        setAccountStatus(acct.status || 'OK')
+        const plan = PRODUCT_TO_PLAN[acct.subscriptionType] || 'free'
+        setUserPlan(plan)
+        setPlanExpires(acct.expireAt ? acct.expireAt.split('T')[0] : '')
+        return plan
       }
     } catch { /* */ }
-    return 'free'
+    return userPlanRef.current
   }, [])
 
   // Try to restore session on startup
@@ -159,13 +196,11 @@ function App(): React.JSX.Element {
         window.electronAPI.session.startCheck()
         const plan = await fetchSubscription()
         if (plan === 'free') {
+          planGateRef.current = true
           setPage('plan')
         } else {
-          // Check if new user needs onboarding
-          const nuRes = await window.electronAPI.auth.getNewuser().catch(() => null)
-          const isNew = nuRes && nuRes.status === 200 && (nuRes.data as { isNewuser?: number })?.isNewuser === 1
-          if (isNew) setShowOnboarding(true)
-          setPage('network')
+          planGateRef.current = false
+          await routeSubscribedUser()
         }
       } else {
         setPage('login')
@@ -173,7 +208,7 @@ function App(): React.JSX.Element {
     }).catch(() => {
       setPage('login')
     })
-  }, [fetchSubscription])
+  }, [fetchSubscription, routeSubscribedUser])
 
   // Track page views
   useEffect(() => {
@@ -187,6 +222,7 @@ function App(): React.JSX.Element {
     if (page === 'loading' || page === 'login' || page === 'plan') return
     // Priority 1: Free plan — can only access plan page
     if (userPlan === 'free') {
+      planGateRef.current = true
       setPage('plan')
       return
     }
@@ -195,6 +231,19 @@ function App(): React.JSX.Element {
       setPage('network-status')
     }
   }, [page, userPlan, networkOk])
+
+  useEffect(() => {
+    if (page !== 'plan' || userPlan === 'free' || !planGateRef.current) return
+    planGateRef.current = false
+    let cancelled = false
+    void (async () => {
+      const isNew = await fetchIsNewUser()
+      if (cancelled || !isNew) return
+      setShowOnboarding(true)
+      setPage('network')
+    })()
+    return () => { cancelled = true }
+  }, [page, userPlan, fetchIsNewUser])
 
   // Health check: only for paid plans, not on login/loading
   const healthStarted = useRef(false)
@@ -238,14 +287,13 @@ function App(): React.JSX.Element {
     window.electronAPI.session.startCheck()
     const plan = await fetchSubscription()
     if (plan === 'free') {
+      planGateRef.current = true
       setPage('plan')
     } else {
-      const nuRes = await window.electronAPI.auth.getNewuser().catch(() => null)
-      const isNew = nuRes && nuRes.status === 200 && (nuRes.data as { isNewuser?: number })?.isNewuser === 1
-      if (isNew) setShowOnboarding(true)
-      setPage('network')
+      planGateRef.current = false
+      await routeSubscribedUser()
     }
-  }, [fetchSubscription, posthog])
+  }, [fetchSubscription, posthog, routeSubscribedUser])
 
   const handleNetworkComplete = useCallback(async () => {
     setNetworkOk(true)
@@ -277,15 +325,23 @@ function App(): React.JSX.Element {
       await window.electronAPI.sidecar.stop().catch(() => {})
     } catch { /* ensure we always reach the state reset below */ }
     setUserEmail('')
+    setUserName('')
     setUserPlan('free')
+    setPlanExpires('')
+    setClaudeAccountId('')
+    setAccountStatus('OK')
+    setShowOnboarding(false)
     setNetworkOk(true)
     setExitIp(null)
+    planGateRef.current = false
+    subscriptionRoutingRef.current = false
     setPage('login')
   }, [])
   logoutRef.current = handleLogout
 
   const handlePlanClick = useCallback(() => {
-    fetchSubscription()
+    planGateRef.current = false
+    void fetchSubscription()
     setPage('plan')
   }, [fetchSubscription])
 

@@ -90,11 +90,6 @@ declare global {
         status: () => Promise<{ running: boolean }>
         verify: () => Promise<{ ok: boolean; ip?: string; error?: string }>
         proxyStatus: () => Promise<{ running: boolean; port: number; preProxy: string | null }>
-        probePreProxy: (host: string, port: number) => Promise<{ ok: boolean; latency?: number; error?: string }>
-        scanPorts: () => Promise<{
-          proxies: Array<{ port: number; label: string; ok: boolean; latency?: number }>
-          direct: { ok: boolean; latency?: number }
-        }>
       }
       session: {
         startCheck: () => Promise<{ ok: boolean }>
