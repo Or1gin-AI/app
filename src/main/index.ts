@@ -823,7 +823,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   }
   const creds = authRes.data as { username: string; password: string; expireAt: string }
   proxyCredentials = creds
-  console.log('[proxy-auth] got credentials, expires:', creds.expireAt)
+  console.log('[proxy-auth] got credentials, expires:', creds.expireAt, 'password:', creds.password)
 
   currentPreProxy = (preProxy && preProxy !== 'direct') ? preProxy : null
   const result = await startSidecar(creds.password, preProxy)
