@@ -41,6 +41,7 @@ func main() {
 
 			fmt.Println("[helper] proxy still set (crash detected), starting recovery")
 			clearSystemProxy(*port)
+			clearShellProxy()
 			if *xrayPid > 0 {
 				killProcess(*xrayPid)
 			}
