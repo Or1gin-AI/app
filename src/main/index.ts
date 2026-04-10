@@ -49,7 +49,24 @@ function getSessionPath(): string {
   return join(app.getPath('userData'), 'session.json')
 }
 
-function loadSession(): { cookies: string[]; user?: { email: string; name: string } } {
+interface StoredSession {
+  cookies: string[]
+  token?: string
+  user?: { email: string; name: string }
+}
+
+interface AuthSessionPayload {
+  user?: {
+    email: string
+    name?: string
+    username?: string
+  }
+  session?: {
+    token?: string
+  }
+}
+
+function loadSession(): StoredSession {
   try {
     const p = getSessionPath()
     if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf-8'))
@@ -57,8 +74,8 @@ function loadSession(): { cookies: string[]; user?: { email: string; name: strin
   return { cookies: [] }
 }
 
-function saveSession(cookies: string[], user?: { email: string; name: string }): void {
-  writeFileSync(getSessionPath(), JSON.stringify({ cookies, user }))
+function saveSession(cookies: string[], user?: { email: string; name: string }, token?: string | null): void {
+  writeFileSync(getSessionPath(), JSON.stringify({ cookies, user, token: token ?? undefined }))
 }
 
 function clearSession(): void {
@@ -66,7 +83,25 @@ function clearSession(): void {
 }
 
 let sessionCookies: string[] = []
+let sessionToken: string | null = null
 let sessionUser: { email: string; name: string } | undefined
+
+function captureSession(data: unknown): void {
+  if (!data || typeof data !== 'object') return
+  const payload = data as AuthSessionPayload
+  if (payload.session?.token) {
+    sessionToken = payload.session.token
+  }
+  if (payload.user?.email) {
+    sessionUser = {
+      email: payload.user.email,
+      name: payload.user.name ?? payload.user.username ?? sessionUser?.name ?? '',
+    }
+  }
+  if (sessionCookies.length > 0 || sessionToken || sessionUser) {
+    saveSession(sessionCookies, sessionUser, sessionToken)
+  }
+}
 
 async function authFetch(
   method: string,
@@ -101,6 +136,7 @@ async function authFetch(
   } catch {
     data = text
   }
+  captureSession(data)
   return { status: resp.status, data }
 }
 
@@ -444,24 +480,20 @@ ipcMain.handle('detect-system-proxy', async () => {
 // Restore session from disk — called on app start
 ipcMain.handle('auth:restore-session', async () => {
   const saved = loadSession()
-  if (saved.cookies.length === 0) return { ok: false }
-
   sessionCookies = saved.cookies
+  sessionToken = saved.token ?? null
   sessionUser = saved.user
 
   // Verify session is still valid
   const res = await authFetch('GET', '/api/auth/get-session')
   if (res.status === 200) {
-    const data = res.data as { user?: { email: string; name: string } }
-    if (data?.user) {
-      sessionUser = { email: data.user.email, name: data.user.name }
-      saveSession(sessionCookies, sessionUser)
-    }
+    captureSession(res.data)
     return { ok: true, user: sessionUser }
   }
 
   // Session expired
   sessionCookies = []
+  sessionToken = null
   sessionUser = undefined
   clearSession()
   return { ok: false }
@@ -478,14 +510,11 @@ ipcMain.handle('auth:check-username', async (_e, username: string) => {
 ipcMain.handle('auth:sign-in', async (_e, email: string, password: string, turnstileToken?: string) => {
   // Clear old session to avoid stale emailVerified state
   sessionCookies = []
+  sessionToken = null
   sessionUser = undefined
   const res = await authFetch('POST', '/api/auth/sign-in/email', { email, password, turnstileToken })
   if (res.status === 200) {
-    const data = res.data as { user?: { email: string; name: string } }
-    if (data?.user) {
-      sessionUser = { email: data.user.email, name: data.user.name }
-      saveSession(sessionCookies, sessionUser)
-    }
+    captureSession(res.data)
   }
   return res
 })
@@ -523,6 +552,7 @@ ipcMain.handle('auth:profile', async () => {
 ipcMain.handle('auth:sign-out', async () => {
   const result = await authFetch('POST', '/api/auth/sign-out')
   sessionCookies = []
+  sessionToken = null
   sessionUser = undefined
   clearSession()
   return result
@@ -635,14 +665,15 @@ async function ticketFetch(
 ): Promise<{ status: number; data: unknown }> {
   const url = `${TICKET_API}${path}`
   console.log(`[ticket] ${method} ${url}`)
-  const sessionToken = getSessionToken()
-  if (!sessionToken) {
+  const token = await getSessionToken()
+  if (!token) {
+    console.warn(`[ticket] ${method} ${path} skipped: missing session token`)
     return { status: 401, data: { message: 'Not authenticated' } }
   }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${sessionToken}`,
+    'Authorization': `Bearer ${token}`,
   }
   try {
     const resp = await net.fetch(url, {
@@ -661,10 +692,21 @@ async function ticketFetch(
   }
 }
 
-function getSessionToken(): string | null {
+async function getSessionToken(): Promise<string | null> {
+  if (sessionToken) return sessionToken
+
   const cookie = sessionCookies.find((item) => item.startsWith('better-auth.session_token='))
-  if (!cookie) return null
-  return cookie.slice('better-auth.session_token='.length)
+  if (cookie) {
+    sessionToken = cookie.slice('better-auth.session_token='.length)
+    saveSession(sessionCookies, sessionUser, sessionToken)
+    return sessionToken
+  }
+
+  const res = await authFetch('GET', '/api/auth/get-session')
+  if (res.status !== 200) return null
+
+  captureSession(res.data)
+  return sessionToken
 }
 
 ipcMain.handle('ticket:list', async (_e, params: string) => {
