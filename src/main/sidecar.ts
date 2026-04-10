@@ -459,10 +459,27 @@ export function startHelper(): void {
 
 export function stopHelper(): void {
   if (helperProcess) {
-    const proc = helperProcess
+    const pid = helperProcess.pid
     helperProcess = null
-    try { proc.kill('SIGTERM') } catch { /* already dead */ }
+    if (process.platform === 'win32' && pid) {
+      // Windows: SIGTERM doesn't work on detached processes, use taskkill
+      execFile('taskkill', ['/F', '/PID', String(pid)], () => {})
+    } else {
+      try { helperProcess?.kill('SIGTERM') } catch { /* already dead */ }
+    }
   }
+}
+
+/** Kill any orphaned helper processes (startup cleanup) */
+export function killOrphanedHelper(): void {
+  try {
+    if (process.platform === 'win32') {
+      execFile('taskkill', ['/F', '/IM', 'originai-helper.exe'], () => {})
+    } else {
+      const binary = getHelperBinary()
+      execFile('pkill', ['-f', binary], () => {})
+    }
+  } catch { /* best effort */ }
 }
 
 // ── System proxy management ──
