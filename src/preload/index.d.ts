@@ -78,11 +78,11 @@ declare global {
         listenEmail: (email?: string) => Promise<AuthResponse>
       }
       ticket: {
-        list: (userId: string, userName: string, params: string) => Promise<AuthResponse>
-        detail: (userId: string, userName: string, ticketId: string) => Promise<AuthResponse>
-        create: (userId: string, userName: string, body: Record<string, unknown>) => Promise<AuthResponse>
-        timeline: (userId: string, userName: string, ticketId: string) => Promise<AuthResponse>
-        comment: (userId: string, userName: string, ticketId: string, content: string) => Promise<AuthResponse>
+        list: (params: string) => Promise<AuthResponse>
+        detail: (ticketId: string) => Promise<AuthResponse>
+        create: (body: Record<string, unknown>) => Promise<AuthResponse>
+        timeline: (ticketId: string) => Promise<AuthResponse>
+        comment: (ticketId: string, content: string) => Promise<AuthResponse>
       }
       sidecar: {
         start: (preProxy?: string) => Promise<{ ok: boolean; error?: string }>

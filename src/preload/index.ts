@@ -56,16 +56,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listenEmail: (email?: string) => ipcRenderer.invoke('claude-account:listen-email', email),
   },
   ticket: {
-    list: (userId: string, userName: string, params: string) =>
-      ipcRenderer.invoke('ticket:list', userId, userName, params),
-    detail: (userId: string, userName: string, ticketId: string) =>
-      ipcRenderer.invoke('ticket:detail', userId, userName, ticketId),
-    create: (userId: string, userName: string, body: Record<string, unknown>) =>
-      ipcRenderer.invoke('ticket:create', userId, userName, body),
-    timeline: (userId: string, userName: string, ticketId: string) =>
-      ipcRenderer.invoke('ticket:timeline', userId, userName, ticketId),
-    comment: (userId: string, userName: string, ticketId: string, content: string) =>
-      ipcRenderer.invoke('ticket:comment', userId, userName, ticketId, content),
+    list: (params: string) =>
+      ipcRenderer.invoke('ticket:list', params),
+    detail: (ticketId: string) =>
+      ipcRenderer.invoke('ticket:detail', ticketId),
+    create: (body: Record<string, unknown>) =>
+      ipcRenderer.invoke('ticket:create', body),
+    timeline: (ticketId: string) =>
+      ipcRenderer.invoke('ticket:timeline', ticketId),
+    comment: (ticketId: string, content: string) =>
+      ipcRenderer.invoke('ticket:comment', ticketId, content),
   },
   sidecar: {
     start: (preProxy?: string) => ipcRenderer.invoke('sidecar:start', preProxy),
