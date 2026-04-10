@@ -10,3 +10,7 @@ resources/sidecar/*/xray
 resources/sidecar/*/xray.exe
 resources/sidecar/*/geoip.dat
 resources/sidecar/*/geosite.dat
+
+# Helper binaries (built by scripts/build-helper.sh)
+resources/sidecar/*/originai-helper
+resources/sidecar/*/originai-helper.exe

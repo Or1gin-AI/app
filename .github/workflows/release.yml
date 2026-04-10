@@ -50,10 +50,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Download latest Xray (macOS)
         run: bash scripts/download-xray.sh darwin
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build helper (macOS)
+        run: bash scripts/build-helper.sh darwin
 
       - name: Write .env
         run: |
@@ -85,11 +92,19 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Download latest Xray (Windows)
         shell: bash
         run: bash scripts/download-xray.sh win32
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build helper (Windows)
+        shell: bash
+        run: bash scripts/build-helper.sh win32
 
       - name: Write .env
         shell: bash
@@ -121,10 +136,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Download latest Xray (Linux)
         run: bash scripts/download-xray.sh linux
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build helper (Linux)
+        run: bash scripts/build-helper.sh linux
 
       - name: Write .env
         run: |
