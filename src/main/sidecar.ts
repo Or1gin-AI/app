@@ -587,16 +587,13 @@ export function checkSystemProxy(): Promise<boolean> {
         resolve(httpEnabled && portMatch?.[1] === expected)
       })
     } else if (process.platform === 'win32') {
-      // Must check both ProxyEnable AND ProxyServer
       execFile('reg', [
         'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+        '/v', 'ProxyServer'
       ], (err, stdout) => {
         if (err) { resolve(false); return }
-        const enableMatch = /ProxyEnable\s+REG_DWORD\s+0x(\d+)/.exec(stdout)
-        const enabled = enableMatch && parseInt(enableMatch[1], 16) === 1
-        const serverMatch = /ProxyServer\s+REG_SZ\s+(.+)/.exec(stdout)
-        const serverOk = serverMatch && serverMatch[1].trim() === `127.0.0.1:${expected}`
-        resolve(!!enabled && !!serverOk)
+        const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/)
+        resolve(match?.[1]?.trim() === `127.0.0.1:${expected}`)
       })
     } else {
       resolve(true)
