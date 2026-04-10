@@ -522,14 +522,42 @@ export HTTP_PROXY="${PROXY_URL}"
 export HTTPS_PROXY="${PROXY_URL}"
 ${MARKER_END}`
 
+const FISH_PROXY_SNIPPET = `${MARKER}
+set -gx http_proxy "${PROXY_URL}"
+set -gx https_proxy "${PROXY_URL}"
+set -gx HTTP_PROXY "${PROXY_URL}"
+set -gx HTTPS_PROXY "${PROXY_URL}"
+${MARKER_END}`
+
 function getShellProfiles(): string[] {
   const home = homedir()
-  if (process.platform === 'darwin') {
-    return [join(home, '.zshenv')]
-  } else if (process.platform === 'win32') {
-    return []
-  }
-  return [join(home, '.bashrc')]
+  if (process.platform === 'win32') return []
+  // Cover all common Unix shells — inject into every profile that exists or is likely used
+  return [
+    join(home, '.zshenv'),     // zsh (loaded for every zsh session, interactive or not)
+    join(home, '.zshrc'),      // zsh interactive
+    join(home, '.bashrc'),     // bash interactive
+    join(home, '.bash_profile'), // bash login (macOS Terminal.app uses login shell)
+    join(home, '.profile'),    // sh / dash / fallback for bash login
+    join(home, '.config', 'fish', 'config.fish'), // fish (needs different syntax, handled below)
+  ].filter(p => p.endsWith('config.fish') || existsSync(p))
+}
+
+const PS_MARKER = '# >>> OriginAI Proxy >>>'
+const PS_MARKER_END = '# <<< OriginAI Proxy <<<'
+const PS_PROXY_SNIPPET = `${PS_MARKER}
+$env:http_proxy = "${PROXY_URL}"
+$env:https_proxy = "${PROXY_URL}"
+$env:HTTP_PROXY = "${PROXY_URL}"
+$env:HTTPS_PROXY = "${PROXY_URL}"
+${PS_MARKER_END}`
+
+function getWindowsPowerShellProfiles(): string[] {
+  const home = homedir()
+  return [
+    join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1'),     // PowerShell 7+
+    join(home, 'Documents', 'WindowsPowerShell', 'Microsoft.PowerShell_profile.ps1'), // Windows PowerShell 5
+  ]
 }
 
 export function setShellProxy(): void {
@@ -540,18 +568,36 @@ export function setShellProxy(): void {
       execFile('setx', ['HTTP_PROXY', PROXY_URL], () => {})
       execFile('setx', ['HTTPS_PROXY', PROXY_URL], () => {})
     } catch { /* */ }
+    // Also inject into PowerShell profiles
+    for (const profile of getWindowsPowerShellProfiles()) {
+      try {
+        const dir = join(profile, '..')
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+        let content = existsSync(profile) ? readFileSync(profile, 'utf-8') : ''
+        const re = new RegExp(`\\n?${PS_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${PS_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g')
+        content = content.replace(re, '\n')
+        content = content.trimEnd() + '\n' + PS_PROXY_SNIPPET + '\n'
+        writeFileSync(profile, content)
+      } catch { /* skip */ }
+    }
     return
   }
 
   for (const profile of getShellProfiles()) {
     try {
+      const isFish = profile.endsWith('config.fish')
+      // Ensure parent dir exists for fish
+      if (isFish) {
+        const dir = join(profile, '..')
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      }
       let content = ''
       if (existsSync(profile)) {
         content = readFileSync(profile, 'utf-8')
       }
       const re = new RegExp(`\\n?${MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g')
       content = content.replace(re, '\n')
-      content = content.trimEnd() + '\n' + PROXY_SNIPPET + '\n'
+      content = content.trimEnd() + '\n' + (isFish ? FISH_PROXY_SNIPPET : PROXY_SNIPPET) + '\n'
       writeFileSync(profile, content)
     } catch { /* skip if no permission */ }
   }
@@ -565,6 +611,16 @@ export function clearShellProxy(): void {
       execFile('setx', ['HTTP_PROXY', ''], () => {})
       execFile('setx', ['HTTPS_PROXY', ''], () => {})
     } catch { /* */ }
+    // Clean PowerShell profiles
+    for (const profile of getWindowsPowerShellProfiles()) {
+      try {
+        if (!existsSync(profile)) continue
+        let content = readFileSync(profile, 'utf-8')
+        const re = new RegExp(`\\n?${PS_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${PS_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g')
+        content = content.replace(re, '\n')
+        writeFileSync(profile, content)
+      } catch { /* skip */ }
+    }
     return
   }
 
