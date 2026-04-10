@@ -150,7 +150,6 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
         'domain:facebook.net',
         // IP check: whitelisted (proxy tunnel); checkip.amazonaws is NOT (direct)
         'domain:ipify.org',
-        'domain:ifconfig.me',
       ],
     },
   ]
@@ -346,7 +345,7 @@ export async function verifySidecar(): Promise<{ ok: boolean; ip?: string; error
   }
 
   // Fallback: Node.js http through proxy (works on Windows without curl issues)
-  const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org') || await verifyViaHttp('ifconfig.me')
+  const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org')
 
   if (httpResult) {
     return { ok: true, ip: httpResult }

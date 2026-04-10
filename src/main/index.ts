@@ -296,7 +296,7 @@ async function fetchExitIpViaProxy(): Promise<string | null> {
   const port = getLocalPort()
   const http = require('node:http') as typeof import('node:http')
 
-  for (const host of ['api.ipify.org', 'api4.ipify.org', 'ifconfig.me']) {
+  for (const host of ['api.ipify.org', 'api4.ipify.org']) {
     const raw = await new Promise<string | null>((resolve) => {
       const req = http.request({
         host: '127.0.0.1',
@@ -875,7 +875,21 @@ ipcMain.handle('sidecar:probe-pre-proxy', async (_e, host: string, port: number)
 })
 
 ipcMain.handle('sidecar:verify', async () => {
-  return verifySidecar()
+  // Session proxy is already set to Xray at this point, so net.fetch goes through the tunnel.
+  // Using HTTPS via Electron's network stack avoids HTTP redirect and curl issues on Windows.
+  for (const url of ['https://api.ipify.org', 'https://api4.ipify.org']) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 20_000)
+      const resp = await net.fetch(url, { signal: controller.signal })
+      clearTimeout(timer)
+      if (resp.ok) {
+        const text = (await resp.text()).trim()
+        if (isValidIp(text)) return { ok: true, ip: text }
+      }
+    } catch { /* try next */ }
+  }
+  return { ok: false, error: 'Verification failed — could not reach IP check service through tunnel' }
 })
 
 // Settings IPC

@@ -12,9 +12,10 @@ import (
 )
 
 func isProxySet(port int) bool {
-	out, err := exec.Command("reg", "query",
+	cmd := hiddenCmd("reg", "query",
 		`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
-		"/v", "ProxyServer").Output()
+		"/v", "ProxyServer")
+	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
@@ -23,14 +24,21 @@ func isProxySet(port int) bool {
 	return len(match) > 1 && strings.TrimSpace(match[1]) == expected
 }
 
+// hiddenCmd creates an exec.Cmd that won't show a console window on Windows
+func hiddenCmd(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return cmd
+}
+
 func clearSystemProxy(port int) {
 	fmt.Println("[helper] clearing system proxy on Windows")
 
-	exec.Command("reg", "add",
+	hiddenCmd("reg", "add",
 		`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
 		"/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f").Run()
 
-	exec.Command("reg", "delete",
+	hiddenCmd("reg", "delete",
 		`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
 		"/v", "ProxyServer", "/f").Run()
 

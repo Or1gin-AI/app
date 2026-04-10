@@ -8,14 +8,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"syscall"
 )
 
 var psMarkerRe = regexp.MustCompile(`\n?# >>> OriginAI Proxy >>>[\s\S]*?# <<< OriginAI Proxy <<<\n?`)
 
 func clearShellProxy() {
-	// Clear env vars via setx
+	// Clear env vars via setx (hidden window)
 	for _, v := range []string{"http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"} {
-		exec.Command("setx", v, "").Run()
+		cmd := exec.Command("setx", v, "")
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		cmd.Run()
 	}
 	fmt.Println("[helper] cleared env vars via setx")
 
