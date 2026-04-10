@@ -740,13 +740,12 @@ function stopProxyMonitor(): void {
 }
 
 ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
-  // Clear any stale proxy from a previous attempt BEFORE doing anything.
-  // This prevents: 1) authFetch routing through dead/looping proxy,
-  // 2) detect-system-proxy picking up our own port as "user's Clash"
+  // Clear session proxy so authFetch goes direct (in-memory, no OS network change).
+  // Don't clear system proxy here — it triggers ERR_NETWORK_CHANGED.
+  // System proxy will be overwritten by setSystemProxy() after Xray starts.
   for (const win of BrowserWindow.getAllWindows()) {
     await win.webContents.session.setProxy({ mode: 'direct' })
   }
-  await clearSystemProxy().catch(() => {})
 
   const authRes = await authFetch('GET', '/api/proxy-auth/login')
   if (authRes.status !== 200) {
