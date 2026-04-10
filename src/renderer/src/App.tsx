@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { usePostHog } from '@posthog/react'
+import { track, identify, reset as resetTelemetry, disableTelemetry, EVENTS } from '@/lib/telemetry'
 import { LocaleProvider } from '@/i18n/context'
 import { Titlebar } from '@/components/Titlebar'
 import { LoginPage } from '@/pages/LoginPage'
@@ -81,6 +82,7 @@ function App(): React.JSX.Element {
   const [userPlan, setUserPlan] = useState<PlanId>('free')
   const [planExpires, setPlanExpires] = useState('')
   const [claudeAccountId, setClaudeAccountId] = useState('')
+  const [accountStatus, setAccountStatus] = useState('OK')
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [networkOk, setNetworkOk] = useState(true)
   const [exitIp, setExitIp] = useState<string | null>(null)
@@ -123,17 +125,16 @@ function App(): React.JSX.Element {
           id: string
           subscriptionType: string
           expireAt: string
+          status: string
+          currentOrder: string | null
         }>
         if (accounts.length > 0) {
           const acct = accounts[0]
           setClaudeAccountId(acct.id)
+          setAccountStatus(acct.status || 'OK')
           const plan = PRODUCT_TO_PLAN[acct.subscriptionType] || 'free'
           setUserPlan(plan)
-          setPlanExpires(
-            acct.subscriptionType !== 'FREE' && acct.expireAt
-              ? acct.expireAt.split('T')[0]
-              : ''
-          )
+          setPlanExpires(acct.expireAt ? acct.expireAt.split('T')[0] : '')
           return plan
         }
       }
@@ -143,11 +144,18 @@ function App(): React.JSX.Element {
 
   // Try to restore session on startup
   useEffect(() => {
+    // Check telemetry disable flag
+    window.electronAPI.telemetryDisabled().then((disabled: boolean) => {
+      if (disabled) disableTelemetry()
+    }).catch(() => {})
+
+    track(EVENTS.APP_STARTED, { version: window.electronAPI.appVersion, platform: window.electronAPI.platform })
+
     window.electronAPI.auth.restoreSession().then(async (res) => {
       if (res.ok && res.user) {
         setUserEmail(res.user.email)
         setUserName(res.user.name ?? '')
-        posthog.identify(res.user.email, { name: res.user.name ?? '' })
+        identify(res.user.email, { name: res.user.name ?? '' })
         window.electronAPI.session.startCheck()
         const plan = await fetchSubscription()
         if (plan === 'free') {
@@ -170,9 +178,9 @@ function App(): React.JSX.Element {
   // Track page views
   useEffect(() => {
     if (page !== 'loading') {
-      posthog.capture('$pageview', { page })
+      track(EVENTS.PAGE_VIEW, { page })
     }
-  }, [page, posthog])
+  }, [page])
 
   // Page access guards
   useEffect(() => {
@@ -225,8 +233,8 @@ function App(): React.JSX.Element {
   const handleLogin = useCallback(async (user: { email: string; name: string }) => {
     setUserEmail(user.email)
     setUserName(user.name)
-    posthog.identify(user.email, { name: user.name })
-    posthog.capture('user_logged_in')
+    identify(user.email, { name: user.name })
+    track(EVENTS.USER_LOGGED_IN)
     window.electronAPI.session.startCheck()
     const plan = await fetchSubscription()
     if (plan === 'free') {
@@ -242,7 +250,7 @@ function App(): React.JSX.Element {
   const handleNetworkComplete = useCallback(async () => {
     setNetworkOk(true)
     setPage('main')
-    posthog.capture('network_optimization_complete')
+    track(EVENTS.NETWORK_OPTIMIZATION_COMPLETE)
     // Immediately refresh exit IP after optimization
     const res = await window.electronAPI.checkIpQuick()
     setNetworkOk(res.ok)
@@ -259,8 +267,8 @@ function App(): React.JSX.Element {
           await window.electronAPI.settings.set({ ...s, autoLogin: false }).catch(() => {})
         }
       }
-      try { posthog.capture('user_logged_out', { reason: skipSignOut ? 'session_expired' : 'manual' }) } catch { /* */ }
-      try { posthog.reset() } catch { /* */ }
+      track(EVENTS.USER_LOGGED_OUT, { reason: skipSignOut ? 'session_expired' : 'manual' })
+      resetTelemetry()
       // Stop session check + health check + sidecar
       try { window.electronAPI.session?.stopCheck?.() } catch { /* */ }
       window.electronAPI.health.stop().catch(() => {})
@@ -353,6 +361,7 @@ function App(): React.JSX.Element {
                 expiresAt={planExpires}
                 userEmail={userEmail}
                 claudeAccountId={claudeAccountId}
+                accountStatus={accountStatus}
                 networkOk={networkOk}
                 onBack={userPlan !== 'free' ? handlePlanBack : undefined}
                 onRefresh={fetchSubscription}
