@@ -622,7 +622,7 @@ ipcMain.handle('claude-account:listen-email', async (_e, email?: string) => {
 })
 
 // Ticket system IPC handlers
-const TICKET_API = 'https://api.ticket.originai.cc'
+const TICKET_API = process.env.TICKET_API_BASE || 'https://api-ticket.originai.cc'
 
 async function ticketFetch(
   method: string,
