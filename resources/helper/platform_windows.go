@@ -5,9 +5,23 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strings"
 	"syscall"
 	"unsafe"
 )
+
+func isProxySet(port int) bool {
+	out, err := exec.Command("reg", "query",
+		`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
+		"/v", "ProxyServer").Output()
+	if err != nil {
+		return false
+	}
+	match := regexp.MustCompile(`ProxyServer\s+REG_SZ\s+(.+)`).FindStringSubmatch(string(out))
+	expected := fmt.Sprintf("127.0.0.1:%d", port)
+	return len(match) > 1 && strings.TrimSpace(match[1]) == expected
+}
 
 func clearSystemProxy(port int) {
 	fmt.Println("[helper] clearing system proxy on Windows")

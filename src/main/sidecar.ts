@@ -417,17 +417,12 @@ export function startHelper(): void {
 
   console.log('[helper] starting:', binary, args.join(' '))
   helperProcess = spawn(binary, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: 'ignore', // fully detach — no pipes that break on parent exit
     detached: true,
     windowsHide: true,
   })
 
-  helperProcess.stdout?.on('data', (d: Buffer) => console.log('[helper]', d.toString().trimEnd()))
-  helperProcess.stderr?.on('data', (d: Buffer) => console.error('[helper]', d.toString().trimEnd()))
-  helperProcess.on('exit', (code) => {
-    console.log('[helper] exited with code', code)
-    helperProcess = null
-  })
+  helperProcess.on('error', () => { helperProcess = null })
 
   // Unref so helper doesn't prevent Electron from exiting
   helperProcess.unref()

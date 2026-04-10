@@ -5,7 +5,16 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 )
+
+func isProxySet(port int) bool {
+	out, err := exec.Command("gsettings", "get", "org.gnome.system.proxy", "mode").Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), "manual")
+}
 
 func clearSystemProxy(port int) {
 	fmt.Println("[helper] clearing system proxy on Linux")

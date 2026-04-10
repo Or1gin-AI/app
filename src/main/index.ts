@@ -922,7 +922,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
   stopProxyMonitor()
-  stopHelper()
+  // Don't stopHelper() here — let helper survive and self-detect:
+  // after PID gone, it waits 2s, checks if proxy was already cleared.
+  // Normal exit: proxy cleared → helper exits silently.
+  // Crash: proxy still set → helper runs recovery + dialog.
   await clearSystemProxy().catch(() => {})
   await stopSidecar()
 })
