@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, generatePacScript, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, isPacServerRunning } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -246,22 +246,15 @@ function fetchExitIpDirect(): Promise<string | null> {
 /** Fetch exit IP through proxy: ipify.org is whitelisted in Xray routing → goes through Trojan tunnel */
 function fetchExitIpViaProxy(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
+  const port = getLocalPort()
   return new Promise((resolve) => {
-    // api.ipify.org is in Xray routing rules → routed through Trojan tunnel → returns exit IP
-    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', 'http://127.0.0.1:8080', 'https://api.ipify.org'],
+    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${port}`, 'https://api.ipify.org'],
       (err, stdout) => {
         if (err) { resolve(null); return }
         resolve(stdout.trim() || null)
       }
     )
   })
-}
-
-/** Get exit IP: always try proxy first, fallback to direct */
-async function fetchExitIp(): Promise<string | null> {
-  const proxyIp = await fetchExitIpViaProxy()
-  if (proxyIp) return proxyIp
-  return fetchExitIpDirect()
 }
 
 // Full IP check: always direct (used by NetworkSetupPage initial detection)
@@ -310,11 +303,10 @@ ipcMain.handle('check-ip-quick', async () => {
 // Local IP: checkip.amazonaws.com is NOT in Xray routing rules → Xray sends it direct → local IP
 ipcMain.handle('check-local-ip', async () => {
   const { execFile } = require('child_process') as typeof import('child_process')
+  const port = getLocalPort()
   return new Promise<{ ok: boolean; ip: string | null }>((resolve) => {
-    // Route through Xray, but checkip.amazonaws.com is not whitelisted → direct outbound → local IP
-    // This validates that Xray routing correctly sends non-whitelisted traffic direct
     const args = isSidecarRunning()
-      ? ['-4', '-s', '--max-time', '10', '-x', 'http://127.0.0.1:8080', 'https://checkip.amazonaws.com']
+      ? ['-4', '-s', '--max-time', '10', '-x', `http://127.0.0.1:${port}`, 'https://checkip.amazonaws.com']
       : ['-4', '-s', '--noproxy', '*', '--max-time', '10', 'https://checkip.amazonaws.com']
     execFile('curl', args, (err, stdout) => {
       const ip = err ? null : stdout.trim() || null
@@ -721,8 +713,28 @@ function scheduleProxyRefresh(): void {
   console.log(`[proxy-auth] next refresh in ${Math.round(refreshIn / 60000)} min`)
 }
 
+// --- System proxy monitor (only when optimization active) ---
+let proxyMonitorInterval: ReturnType<typeof setInterval> | null = null
+
+function startProxyMonitor(): void {
+  if (proxyMonitorInterval) return
+  proxyMonitorInterval = setInterval(async () => {
+    if (!isSidecarRunning()) return
+    const ours = await checkSystemProxy()
+    if (!ours) {
+      broadcast('proxy:conflict', { hijacked: true })
+    }
+  }, 3000)
+}
+
+function stopProxyMonitor(): void {
+  if (proxyMonitorInterval) {
+    clearInterval(proxyMonitorInterval)
+    proxyMonitorInterval = null
+  }
+}
+
 ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
-  // Fetch proxy credentials first
   const authRes = await authFetch('GET', '/api/proxy-auth/login')
   if (authRes.status !== 200) {
     const errData = authRes.data as { message?: string } | undefined
@@ -739,15 +751,16 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
 
   const result = await startSidecar(creds.password, preProxy)
   if (result.ok) {
-    const pac = generatePacScript()
+    const port = getLocalPort()
     for (const win of BrowserWindow.getAllWindows()) {
       await win.webContents.session.setProxy({
-        pacScript: `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`
+        proxyRules: `http://127.0.0.1:${port}`
       })
     }
-    await setSystemProxy().catch(() => { /* non-fatal */ })
+    await setSystemProxy().catch(() => {})
     setShellProxy()
     scheduleProxyRefresh()
+    startProxyMonitor()
   }
   return result
 })
@@ -755,13 +768,13 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
 ipcMain.handle('sidecar:stop', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
   proxyCredentials = null
+  stopProxyMonitor()
   await stopSidecar()
 
   for (const win of BrowserWindow.getAllWindows()) {
     await win.webContents.session.setProxy({ mode: 'direct' })
   }
-  // Clear system proxy + shell env
-  await clearSystemProxy().catch(() => { /* non-fatal */ })
+  await clearSystemProxy().catch(() => {})
   return { ok: true }
 })
 
@@ -769,8 +782,12 @@ ipcMain.handle('sidecar:status', () => {
   return { running: isSidecarRunning() }
 })
 
-ipcMain.handle('sidecar:pac-status', () => {
-  return { running: isPacServerRunning() }
+ipcMain.handle('sidecar:proxy-status', () => {
+  return { running: isSidecarRunning(), port: getLocalPort() }
+})
+
+ipcMain.handle('sidecar:probe-pre-proxy', async (_e, host: string, port: number) => {
+  return probePreProxy(host, port)
 })
 
 ipcMain.handle('sidecar:verify', async () => {
@@ -846,6 +863,14 @@ app.whenReady().then(() => {
   // Clean up any sing-box left by a previous crash
   killOrphanedSidecar()
 
+  // Crash recovery: if system proxy points to our port but Xray isn't running, clean up
+  checkSystemProxy().then((ours) => {
+    if (ours && !isSidecarRunning()) {
+      console.log('[proxy] stale system proxy detected from previous crash, cleaning up')
+      clearSystemProxy().catch(() => {})
+    }
+  })
+
   electronApp.setAppUserModelId('com.originai.app')
 
   app.on('browser-window-created', (_, window) => {
@@ -885,6 +910,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
-  await clearSystemProxy().catch(() => { })
+  stopProxyMonitor()
+  await clearSystemProxy().catch(() => {})
   await stopSidecar()
 })
