@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.1 - 2026-04-10
+
+### 中文
+
+- 为 macOS 发布链路接入正式签名与公证配置。构建现在会使用 `Developer ID Application` 证书进行签名，并通过 App Store Connect API key 完成 notarization。
+- 在 electron-builder 配置中启用 `hardenedRuntime` 和 macOS entitlements，补齐自动更新与 Gatekeeper 所需的基础签名参数。
+- 更新 GitHub Actions 的 macOS 发布流程，支持从仓库 secrets 注入 `CSC_LINK` / `CSC_KEY_PASSWORD` 以及 Apple API key 文件。
+
+### English
+
+- Added production macOS signing and notarization to the release pipeline. macOS builds now sign with a `Developer ID Application` certificate and notarize through an App Store Connect API key.
+- Enabled `hardenedRuntime` and macOS entitlements in electron-builder so the packaged app has the baseline signing settings required by Gatekeeper and auto update.
+- Updated the GitHub Actions macOS release job to consume `CSC_LINK` / `CSC_KEY_PASSWORD` and the Apple API key file from repository secrets.
+
 ## v0.2.0 - 2026-04-10
 
 ### 中文

@@ -14,6 +14,10 @@ artifactName: "OriginAI-${version}-${os}-${arch}.${ext}"
 mac:
   category: public.app-category.utilities
   icon: resources/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   target:
     - target: dmg
       arch:
