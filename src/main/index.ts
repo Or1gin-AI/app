@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -763,6 +763,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
     setShellProxy()
     scheduleProxyRefresh()
     startProxyMonitor()
+    startHelper()
   }
   return result
 })
@@ -772,6 +773,7 @@ ipcMain.handle('sidecar:stop', async () => {
   proxyCredentials = null
   currentPreProxy = null
   stopProxyMonitor()
+  stopHelper()
   await stopSidecar()
 
   for (const win of BrowserWindow.getAllWindows()) {
@@ -920,6 +922,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
   stopProxyMonitor()
+  stopHelper()
   await clearSystemProxy().catch(() => {})
   await stopSidecar()
 })
