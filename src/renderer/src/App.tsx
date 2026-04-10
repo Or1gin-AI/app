@@ -191,10 +191,11 @@ function App(): React.JSX.Element {
   // Health check: only for paid plans, not on login/loading
   const healthStarted = useRef(false)
   useEffect(() => {
-    if (page === 'login' || page === 'loading') return
+    const shouldRunHealth = page === 'main' || page === 'plan' || page === 'network-status'
 
-    // Free plan: no health check needed
-    if (userPlan === 'free') {
+    // Do not probe while the user is configuring networking. Those requests add
+    // noise exactly when Xray is warming up and can interfere with final verify.
+    if (!shouldRunHealth || userPlan === 'free') {
       if (healthStarted.current) {
         window.electronAPI.health.stop()
         if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }

@@ -46,25 +46,39 @@ func clearSystemProxy(port int) {
 }
 
 var (
-	user32         = syscall.NewLazyDLL("user32.dll")
-	procMessageBox = user32.NewProc("MessageBoxW")
+	user32                  = syscall.NewLazyDLL("user32.dll")
+	procMessageBox          = user32.NewProc("MessageBoxW")
+	procGetForegroundWindow = user32.NewProc("GetForegroundWindow")
+	procGetDesktopWindow    = user32.NewProc("GetDesktopWindow")
 )
 
 const (
-	mbOK          = 0x00000000
-	mbIconWarning = 0x00000030
-	mbTopMost     = 0x00040000
+	mbOK            = 0x00000000
+	mbIconWarning   = 0x00000030
+	mbSystemModal   = 0x00001000
+	mbTopMost       = 0x00040000
 	mbSetForeground = 0x00010000
 )
+
+func getDialogOwner() uintptr {
+	if hwnd, _, _ := procGetForegroundWindow.Call(); hwnd != 0 {
+		return hwnd
+	}
+	if hwnd, _, _ := procGetDesktopWindow.Call(); hwnd != 0 {
+		return hwnd
+	}
+	return 0
+}
 
 func showDialog() {
 	t, body := dialogMsg()
 	titlePtr, _ := syscall.UTF16PtrFromString(t)
 	msgPtr, _ := syscall.UTF16PtrFromString(body)
+	owner := getDialogOwner()
 	procMessageBox.Call(
-		0,
+		owner,
 		uintptr(unsafe.Pointer(msgPtr)),
 		uintptr(unsafe.Pointer(titlePtr)),
-		uintptr(mbOK|mbIconWarning|mbTopMost|mbSetForeground),
+		uintptr(mbOK|mbIconWarning|mbTopMost|mbSetForeground|mbSystemModal),
 	)
 }

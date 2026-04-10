@@ -320,7 +320,7 @@ function verifyViaHttp(targetHost: string): Promise<string | null> {
       })
     })
     req.on('error', () => resolve(null))
-    req.setTimeout(20_000, () => { req.destroy(); resolve(null) })
+    req.setTimeout(8_000, () => { req.destroy(); resolve(null) })
     req.end()
   })
 }
@@ -328,30 +328,37 @@ function verifyViaHttp(targetHost: string): Promise<string | null> {
 /** Verify proxy works: try curl first, fallback to Node.js http (for Windows compatibility) */
 export async function verifySidecar(): Promise<{ ok: boolean; ip?: string; error?: string }> {
   const { execFile: exec } = require('child_process') as typeof import('child_process')
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  let lastError = 'All verification methods failed'
 
-  // Try curl first (most reliable on macOS/Linux)
-  const curlResult = await new Promise<string | null>((resolve) => {
-    exec('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${LOCAL_HTTP_PORT}`, 'https://api.ipify.org'],
-      { windowsHide: true },
-      (err, stdout) => {
-        const ip = !err && stdout ? stdout.trim() : ''
-        resolve(isValidIp(ip) ? ip : null)
-      }
-    )
-  })
+  // Windows + upstream HTTP proxy is more stable with a short warm-up + low-level checks.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const curlResult = await new Promise<string | null>((resolve) => {
+      exec('curl', ['-4', '-s', '--max-time', '8', '-x', `http://127.0.0.1:${LOCAL_HTTP_PORT}`, 'https://api.ipify.org'],
+        { windowsHide: true },
+        (err, stdout, stderr) => {
+          const ip = !err && stdout ? stdout.trim() : ''
+          if (err && stderr?.trim()) lastError = stderr.trim()
+          resolve(isValidIp(ip) ? ip : null)
+        }
+      )
+    })
 
-  if (curlResult) {
-    return { ok: true, ip: curlResult }
+    if (curlResult) {
+      return { ok: true, ip: curlResult }
+    }
+
+    const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org')
+    if (httpResult) {
+      return { ok: true, ip: httpResult }
+    }
+
+    if (attempt < 3) {
+      await sleep(1200)
+    }
   }
 
-  // Fallback: Node.js http through proxy (works on Windows without curl issues)
-  const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org')
-
-  if (httpResult) {
-    return { ok: true, ip: httpResult }
-  }
-
-  return { ok: false, error: 'All verification methods failed' }
+  return { ok: false, error: lastError }
 }
 
 export async function stopSidecar(): Promise<void> {
