@@ -676,8 +676,9 @@ ipcMain.handle('ticket:comment', async (_e, userId: string, userName: string, ti
 })
 
 // Sidecar IPC handlers
-// Track proxy credentials for auto-refresh
+// Track proxy credentials and current pre-proxy for auto-refresh / status display
 let proxyCredentials: { username: string; password: string; expireAt: string } | null = null
+let currentPreProxy: string | null = null // e.g. '127.0.0.1:7890' or null if direct
 let proxyRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 function scheduleProxyRefresh(): void {
@@ -749,6 +750,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   proxyCredentials = creds
   console.log('[proxy-auth] got credentials, expires:', creds.expireAt)
 
+  currentPreProxy = (preProxy && preProxy !== 'direct') ? preProxy : null
   const result = await startSidecar(creds.password, preProxy)
   if (result.ok) {
     const port = getLocalPort()
@@ -768,6 +770,7 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
 ipcMain.handle('sidecar:stop', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
   proxyCredentials = null
+  currentPreProxy = null
   stopProxyMonitor()
   await stopSidecar()
 
@@ -783,7 +786,7 @@ ipcMain.handle('sidecar:status', () => {
 })
 
 ipcMain.handle('sidecar:proxy-status', () => {
-  return { running: isSidecarRunning(), port: getLocalPort() }
+  return { running: isSidecarRunning(), port: getLocalPort(), preProxy: currentPreProxy }
 })
 
 ipcMain.handle('sidecar:probe-pre-proxy', async (_e, host: string, port: number) => {

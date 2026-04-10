@@ -163,6 +163,7 @@ export const zh = {
     desc: '代理服务运行中，Claude 流量已通过优化通道',
     descError: '代理连接已断开，请重新配置',
     proxyStatus: '代理状态',
+    upstreamProxy: '前置代理',
     systemProxy: '系统代理',
     hijacked: '已被其他软件覆盖',
     titleConflict: '代理冲突',
