@@ -200,6 +200,8 @@ export const en = {
     email: 'Email',
     currentPlan: 'Current Plan',
     expiresAt: 'Expires',
+    status: 'Status',
+    continuePaying: 'Continue Payment',
     // Activation
     activationTitle: 'Activation Service',
     activationRemaining: 'Remaining',
@@ -253,9 +255,21 @@ export const en = {
     waitingTitle: 'Completing Payment',
     waitingDesc: 'Please complete your payment in the checkout window. This dialog will close automatically.',
     // Cancel subscription
-    cancelSubscription: 'Cancel',
+    cancelSubscription: 'Cancel Subscription',
     cancelTitle: 'Cancel Subscription',
+    cancelConfirmDesc: 'Are you sure you want to cancel your {plan}? Your access will end immediately.',
     cancelDesc: 'Your {plan} will remain active until {date}. To cancel, please contact support@originai.cc or manage through your payment provider.',
+    keepPlan: 'Keep Plan',
+    confirmCancel: 'Cancel Plan',
+    cancelError: 'Failed to cancel subscription, please try again',
+    helioCancelWarningTitle: 'Important Notice',
+    helioCancelWarningDesc: 'Your subscription has been cancelled on our platform. However, you may still receive renewal payment emails from our crypto payment provider.',
+    helioCancelWarningBold: 'Do NOT click any renewal payment links in those emails. Payments made after cancellation will NOT restore your subscription and will NOT be refunded.',
+    helioCancelUnderstood: 'I Understand',
+    // Upgrade success
+    upgradeSuccessTitle: 'Upgrade Successful',
+    upgradeSuccessDesc: 'Your plan has been upgraded from {from} to {to}.',
+    upgradeProrated: 'Prorated charge: {amount}',
     // Error
     errorTitle: 'Error',
     checkoutError: 'Checkout failed, please try again',
