@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   appVersion: process.env.npm_package_version || require('../../package.json').version as string,
+  telemetryDisabled: () => ipcRenderer.invoke('telemetry:is-disabled'),
   checkIp: () => ipcRenderer.invoke('check-ip'),
   checkIpQuick: () => ipcRenderer.invoke('check-ip-quick'),
   checkLocalIp: () => ipcRenderer.invoke('check-local-ip'),
@@ -49,6 +50,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     orders: (page?: number, limit?: number) =>
       ipcRenderer.invoke('payment:orders', page, limit),
+    cancelSubscription: (claudeAccountId: string) =>
+      ipcRenderer.invoke('payment:cancel-subscription', claudeAccountId),
   },
   claudeAccount: {
     create: () => ipcRenderer.invoke('claude-account:create'),

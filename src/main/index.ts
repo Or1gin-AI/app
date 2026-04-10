@@ -23,6 +23,9 @@ app.on('second-instance', () => {
   win.focus()
 })
 
+// Telemetry disable flag (--no-telemetry)
+const TELEMETRY_DISABLED = process.argv.includes('--no-telemetry')
+
 // ── App settings (remember password, auto-login, auto-launch) ──
 
 interface AppSettings {
@@ -629,18 +632,21 @@ ipcMain.handle('payment:open-checkout', async (_e, url: string) => {
   checkoutWin.loadURL(url)
   checkoutWin.once('ready-to-show', () => checkoutWin.show())
 
-  // After checkout page loads, close window if redirected to callback URL (payment done)
-  checkoutWin.webContents.once('did-finish-load', () => {
-    checkoutWin.webContents.on('did-navigate', (_event, navUrl) => {
-      const isCheckout =
-        navUrl.includes('lemonsqueezy.com') ||
-        navUrl.includes('stripe.com') ||
-        navUrl.includes('helio') ||
-        navUrl.includes('moonpay.com')
-      if (!isCheckout && !checkoutWin.isDestroyed()) {
-        checkoutWin.close()
-      }
-    })
+  // Auto-close when navigated to our redirect/success URL
+  const checkAndClose = (navUrl: string): void => {
+    if (checkoutWin.isDestroyed()) return
+    if (navUrl.includes('/api/payment/redirect') || navUrl.includes('/payment/success')) {
+      checkoutWin.close()
+    }
+  }
+
+  checkoutWin.webContents.on('did-navigate', (_event, navUrl) => checkAndClose(navUrl))
+  checkoutWin.webContents.on('did-navigate-in-page', (_event, navUrl) => checkAndClose(navUrl))
+  checkoutWin.webContents.on('will-redirect', (_event, navUrl) => checkAndClose(navUrl))
+  checkoutWin.webContents.on('did-finish-load', () => {
+    if (!checkoutWin.isDestroyed()) {
+      checkAndClose(checkoutWin.webContents.getURL())
+    }
   })
 
   checkoutWin.on('closed', () => {
@@ -666,6 +672,13 @@ ipcMain.handle('payment:orders', async (_e, page?: number, limit?: number) => {
   const query = params.toString()
   return authFetch('GET', `/api/payment/orders${query ? `?${query}` : ''}`)
 })
+
+ipcMain.handle('payment:cancel-subscription', async (_e, claudeAccountId: string) => {
+  return authFetch('POST', '/api/payment/cancel-subscription', { claude_account_id: claudeAccountId })
+})
+
+// Telemetry
+ipcMain.handle('telemetry:is-disabled', () => TELEMETRY_DISABLED)
 
 // Claude Account IPC handlers
 ipcMain.handle('claude-account:create', async () => {
