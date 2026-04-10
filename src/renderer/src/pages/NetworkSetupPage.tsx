@@ -396,75 +396,61 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
       )
     }
 
-    // Scan results
+    // Scan results — only show reachable ports
+    const reachableProxies = scan.proxies.filter((p) => p.ok)
+
     return (
-      <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
-        <div className="w-14 h-14 rounded-full bg-brand/10 flex items-center justify-center mb-5">
+      <div className="flex-1 flex flex-col items-center overflow-y-auto px-12 py-8">
+        <div className="w-14 h-14 rounded-full bg-brand/10 flex items-center justify-center mb-5 shrink-0">
           <VscSettingsGear size={24} className="text-brand" />
         </div>
         <h2 className="font-serif text-xl text-text mb-1.5">{t.network.scanTitle}</h2>
         <p className="text-[13px] text-text-muted mb-6 text-center">{t.network.scanSubtitle}</p>
 
         <div className="w-full max-w-[380px] flex flex-col gap-1.5 mb-4">
-          {scan.proxies.map((p) => (
+          {reachableProxies.map((p) => (
             <button
               key={p.port}
-              onClick={() => p.ok && startOptimize(`127.0.0.1:${p.port}`)}
-              disabled={!p.ok}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${
-                p.ok
-                  ? 'bg-bg-card border-border hover:border-brand/40 cursor-pointer'
-                  : 'bg-bg-alt/50 border-border/50 cursor-not-allowed opacity-50'
-              }`}
+              onClick={() => startOptimize(`127.0.0.1:${p.port}`)}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border bg-bg-card border-border hover:border-brand/40 cursor-pointer text-left transition-colors"
             >
               <div className={`w-2 h-2 rounded-full shrink-0 ${
-                p.ok
-                  ? (p.latency! < 100 ? 'bg-green-500' : p.latency! < 300 ? 'bg-yellow-500' : 'bg-red-500')
-                  : 'bg-gray-300'
+                p.latency! < 100 ? 'bg-green-500' : p.latency! < 300 ? 'bg-yellow-500' : 'bg-red-500'
               }`} />
               <div className="flex-1 min-w-0">
                 <span className="text-[13px] text-text font-mono">127.0.0.1:{p.port}</span>
                 <span className="text-[11px] text-text-faint ml-2">{p.label}</span>
               </div>
               <span className={`text-[12px] font-mono shrink-0 ${
-                p.ok
-                  ? (p.latency! < 100 ? 'text-green-600' : p.latency! < 300 ? 'text-yellow-500' : 'text-red-500')
-                  : 'text-text-faint'
+                p.latency! < 100 ? 'text-green-600' : p.latency! < 300 ? 'text-yellow-500' : 'text-red-500'
               }`}>
-                {p.ok ? `${p.latency}ms` : t.network.scanNotReachable}
+                {p.latency}ms
               </span>
             </button>
           ))}
 
-          {/* Divider */}
-          <div className="border-t border-border my-1" />
-
-          {/* Direct option */}
-          <button
-            onClick={() => scan.direct.ok && startOptimize('direct')}
-            disabled={!scan.direct.ok}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${
-              scan.direct.ok
-                ? 'bg-bg-card border-border hover:border-brand/40 cursor-pointer'
-                : 'bg-bg-alt/50 border-border/50 cursor-not-allowed opacity-50'
-            }`}
-          >
-            <div className={`w-2 h-2 rounded-full shrink-0 ${
-              scan.direct.ok
-                ? (scan.direct.latency! < 100 ? 'bg-green-500' : scan.direct.latency! < 300 ? 'bg-yellow-500' : 'bg-red-500')
-                : 'bg-gray-300'
-            }`} />
-            <div className="flex-1 min-w-0">
-              <span className="text-[13px] text-text">{t.network.scanDirect}</span>
-            </div>
-            <span className={`text-[12px] font-mono shrink-0 ${
-              scan.direct.ok
-                ? (scan.direct.latency! < 100 ? 'text-green-600' : scan.direct.latency! < 300 ? 'text-yellow-500' : 'text-red-500')
-                : 'text-text-faint'
-            }`}>
-              {scan.direct.ok ? `${scan.direct.latency}ms` : t.network.scanNotReachable}
-            </span>
-          </button>
+          {/* Direct option — only if VPS reachable */}
+          {scan.direct.ok && (
+            <>
+              {reachableProxies.length > 0 && <div className="border-t border-border my-1" />}
+              <button
+                onClick={() => startOptimize('direct')}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border bg-bg-card border-border hover:border-brand/40 cursor-pointer text-left transition-colors"
+              >
+                <div className={`w-2 h-2 rounded-full shrink-0 ${
+                  scan.direct.latency! < 100 ? 'bg-green-500' : scan.direct.latency! < 300 ? 'bg-yellow-500' : 'bg-red-500'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <span className="text-[13px] text-text">{t.network.scanDirect}</span>
+                </div>
+                <span className={`text-[12px] font-mono shrink-0 ${
+                  scan.direct.latency! < 100 ? 'text-green-600' : scan.direct.latency! < 300 ? 'text-yellow-500' : 'text-red-500'
+                }`}>
+                  {scan.direct.latency}ms
+                </span>
+              </button>
+            </>
+          )}
         </div>
 
         {!hasAny && (
