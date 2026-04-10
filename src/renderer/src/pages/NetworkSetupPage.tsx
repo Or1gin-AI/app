@@ -412,8 +412,8 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
         {optimizeError ? t.network.optimizeFailedDesc : progress >= 100 ? t.network.optimizeDoneDesc : t.network.optimizingDesc}
       </p>
 
-      {!optimizeError && (
-        <div className="w-full max-w-[380px] bg-bg-card rounded-xl border border-border p-5 mb-4">
+      <div className="w-full max-w-[380px] bg-bg-card rounded-xl border border-border p-5 mb-4">
+        {!optimizeError && (
           <div className="mb-3.5">
             <div className="flex justify-between text-[11px] text-text-muted mb-1.5 font-mono">
               <span>{t.network.configuring}</span>
@@ -423,18 +423,21 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
               <div className="h-full bg-brand rounded-full transition-all duration-100" style={{ width: `${progress}%` }} />
             </div>
           </div>
-          <div className="text-[11px] text-text-faint font-mono leading-[1.8]">
-            {steps.map((label, i) => (
-              <div key={i}>
-                {stepIcon(i)} {label}
-                {i === 1 && probeLatency !== null && step > 1 && (
-                  <span className="text-green-600 ml-1">({probeLatency}ms)</span>
-                )}
-              </div>
-            ))}
-          </div>
+        )}
+        <div className="text-[11px] text-text-faint font-mono leading-[1.8]">
+          {steps.map((label, i) => (
+            <div key={i}>
+              {stepIcon(i)} {label}
+              {i === 1 && probeLatency !== null && step > 1 && (
+                <span className="text-green-600 ml-1">({probeLatency}ms)</span>
+              )}
+            </div>
+          ))}
         </div>
-      )}
+        {optimizeError && (
+          <p className="text-[11px] text-red-500 mt-3 break-all">{optimizeError}</p>
+        )}
+      </div>
 
       {optimizeError ? (
         <button
