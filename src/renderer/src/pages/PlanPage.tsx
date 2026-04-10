@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { useLocale } from '@/i18n/context'
 import { TicketPanel } from '@/components/TicketPanel'
+import { track, EVENTS } from '@/lib/telemetry'
 
 type PlanId = 'free' | 'pro' | '5x' | '20x'
 
@@ -10,10 +11,21 @@ interface PlanPageProps {
   expiresAt: string
   userEmail: string
   claudeAccountId: string
+  accountStatus: string
   networkOk: boolean
   onBack?: () => void
   onRefresh: () => void
 }
+
+const STATUS_DISPLAY: Record<string, { label: string; color: string; icon: string }> = {
+  OK: { label: 'Ready', color: 'text-green-600', icon: '●' },
+  WAIT_FOR_USER_PAYING: { label: 'Awaiting Payment', color: 'text-amber-500', icon: '◐' },
+  WAIT_FOR_OPERATION: { label: 'Processing', color: 'text-blue-500', icon: '◑' },
+  WAIT_FOR_REGISTER: { label: 'Awaiting Registration', color: 'text-purple-500', icon: '◑' },
+  UNREGISTERED: { label: 'Unregistered', color: 'text-text-faint', icon: '○' },
+}
+
+const PLAN_TIERS: Record<PlanId, number> = { free: 0, pro: 1, '5x': 2, '20x': 3 }
 
 const PLAN_PRICES: Record<PlanId, number> = {
   free: 0,
@@ -49,12 +61,14 @@ type ModalState =
   | { step: 'override'; target: PlanId }
   | { step: 'payment'; target: PaymentTarget }
   | { step: 'waiting' }
+  | { step: 'upgrade-success'; previousPlan: string; newPlan: string; proratedPrice: number }
   | { step: 'cancel-confirm' }
+  | { step: 'helio-cancel-warning' }
   | { step: 'activate-confirm' }
   | { step: 'activate'; phase: 'loading' | 'polling' | 'done' | 'error'; sms: SmsData; errorMsg?: string }
   | { step: 'error'; message: string }
 
-export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, networkOk, onBack, onRefresh }: PlanPageProps) {
+export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, accountStatus, networkOk, onBack, onRefresh }: PlanPageProps) {
   const { t } = useLocale()
   const [modal, setModal] = useState<ModalState>(null)
   const [checkoutLoading, setCheckoutLoading] = useState<'stripe' | 'crypto' | null>(null)
@@ -73,7 +87,11 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
     }).catch(() => {})
   }, [])
 
-  useEffect(() => { refreshBalance() }, [refreshBalance])
+  useEffect(() => {
+    refreshBalance()
+    const interval = setInterval(() => { refreshBalance(); onRefresh() }, 5000)
+    return () => clearInterval(interval)
+  }, [refreshBalance, onRefresh])
 
   const handleBuyActivation = () => {
     setModal({ step: 'payment', target: 'activation' as PlanId })
@@ -120,6 +138,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
         if (statusRes.status >= 200 && statusRes.status < 300) {
           const data = statusRes.data as { status: string; code?: string }
           if (data.status === 'CODE_RECEIVED' && data.code) {
+            track(EVENTS.SMS_CODE_RECEIVED)
             stopSmsPoll()
             setModal((prev) => {
               if (!prev || prev.step !== 'activate') return prev
@@ -148,6 +167,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
 
   // After confirming → request number
   const handleActivateConfirm = useCallback(async () => {
+    track(EVENTS.SMS_NUMBER_REQUESTED)
     setModal({ step: 'activate', phase: 'loading', sms: {} })
 
     try {
@@ -210,6 +230,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
   }, [networkOk, t, startSmsPoll])
 
   const handleRefreshNumber = useCallback(async () => {
+    track(EVENTS.SMS_NUMBER_REFRESHED)
     stopSmsPoll()
     setModal({ step: 'activate', phase: 'loading', sms: {} })
     try {
@@ -232,6 +253,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
   }, [t, stopSmsPoll, startSmsPoll])
 
   const handleRefundNumber = useCallback(async () => {
+    track(EVENTS.SMS_REFUNDED)
     stopSmsPoll()
     await window.electronAPI.sms.refund().catch(() => {})
     setSmsCooldownEnd(0)
@@ -283,6 +305,27 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
 
   const currentIdx = PLAN_ORDER.indexOf(currentPlan)
 
+  // Continue payment — directly get existing checkout URL from backend
+  const handleContinuePayment = useCallback(async (plan: PlanId) => {
+    setCheckoutLoading('stripe')
+    try {
+      const productType = PLAN_TO_PRODUCT[plan]
+      // Backend returns existing URL if currentOrder exists
+      const res = await window.electronAPI.payment.checkout(productType, 'LEMONSQUEEZY', claudeAccountId || undefined)
+      if ((res.status === 200 || res.status === 201) && (res.data as any)?.checkoutUrl) {
+        const data = res.data as { checkoutUrl: string; provider?: string }
+        setModal({ step: 'waiting' })
+        await window.electronAPI.payment.openCheckout(data.checkoutUrl)
+      } else {
+        setModal({ step: 'error', message: t.plan.checkoutError })
+      }
+    } catch {
+      setModal({ step: 'error', message: t.plan.checkoutError })
+    } finally {
+      setCheckoutLoading(null)
+    }
+  }, [claudeAccountId, t])
+
   const handleSelect = (plan: PlanId) => {
     if (plan === currentPlan) return
     if (plan === 'free') {
@@ -301,14 +344,63 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
     }
   }
 
-  const handleOverrideConfirm = () => {
+  const handleOverrideConfirm = async () => {
     if (!modal || modal.step !== 'override') return
-    setModal({ step: 'payment', target: modal.target })
+    const productType = PLAN_TO_PRODUCT[modal.target as PlanId]
+    setCheckoutLoading('stripe')
+    try {
+      const res = await window.electronAPI.payment.checkout(
+        productType,
+        undefined,
+        claudeAccountId || undefined
+      )
+      if (res.status === 200 || res.status === 201) {
+        const data = res.data as {
+          checkoutUrl?: string
+          instant?: boolean
+          success?: boolean
+          previousPlan?: string
+          newPlan?: string
+          proratedPrice?: number
+          message?: string
+        }
+        if (data.success && !data.checkoutUrl && (data.instant || data.proratedPrice === 0)) {
+          track(EVENTS.SUBSCRIPTION_UPGRADED, { from: data.previousPlan, to: data.newPlan, instant: true })
+          setModal({
+            step: 'upgrade-success',
+            previousPlan: data.previousPlan || '',
+            newPlan: data.newPlan || '',
+            proratedPrice: data.proratedPrice || 0,
+          })
+          onRefresh()
+          return
+        }
+        if (data.checkoutUrl) {
+          track(EVENTS.CHECKOUT_CREATED, { provider: 'upgrade', productType })
+          onRefresh()
+          setModal({ step: 'waiting' })
+          await window.electronAPI.payment.openCheckout(data.checkoutUrl)
+        } else {
+          setModal({ step: 'error', message: t.plan.checkoutError })
+        }
+      } else {
+        const errData = res.data as { message?: string } | undefined
+        setModal({
+          step: 'error',
+          message: typeof errData === 'object' && errData?.message ? errData.message : t.plan.checkoutError,
+        })
+      }
+    } catch {
+      setModal({ step: 'error', message: t.plan.checkoutError })
+    } finally {
+      setCheckoutLoading(null)
+    }
   }
 
   const handlePaymentSelect = useCallback(
     async (method: 'stripe' | 'crypto') => {
       if (!modal || modal.step !== 'payment') return
+      track(EVENTS.PAYMENT_METHOD_SELECTED, { method, target: modal.target })
 
       const provider = method === 'stripe' ? 'LEMONSQUEEZY' : 'HELIO'
       const productType = modal.target === 'activation' ? 'AI_ACTIVATION' : PLAN_TO_PRODUCT[modal.target as PlanId]
@@ -322,10 +414,35 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
         )
 
         if (res.status === 200 || res.status === 201) {
-          const data = res.data as { checkoutUrl?: string }
+          const data = res.data as {
+            checkoutUrl?: string
+            instant?: boolean
+            success?: boolean
+            existing?: boolean
+            previousPlan?: string
+            newPlan?: string
+            proratedPrice?: number
+            message?: string
+          }
+
+          // Case 1 & 2: Instant upgrade (LS subscription API or Helio free upgrade)
+          if (data.success && !data.checkoutUrl && (data.instant || data.proratedPrice === 0)) {
+            track(EVENTS.SUBSCRIPTION_UPGRADED, { from: data.previousPlan, to: data.newPlan, instant: true })
+            setModal({
+              step: 'upgrade-success',
+              previousPlan: data.previousPlan || '',
+              newPlan: data.newPlan || '',
+              proratedPrice: data.proratedPrice || 0,
+            })
+            onRefresh()
+            return
+          }
+
+          // Case 3, 4, 5: Has checkout URL (new checkout, existing, or Helio prorated)
           if (data.checkoutUrl) {
+            track(EVENTS.CHECKOUT_CREATED, { provider, productType, existing: !!data.existing })
+            onRefresh()
             if (method === 'crypto') {
-              // Crypto needs system browser for wallet extensions
               window.open(data.checkoutUrl, '_blank')
               setModal(null)
             } else {
@@ -394,7 +511,14 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
             </div>
             <div className="shrink-0">
               <p className="text-text-faint text-xs font-mono mb-1">{t.plan.expiresAt}</p>
-              <p className="text-text-secondary">{currentPlan === 'free' ? '—' : expiresAt}</p>
+              <p className="text-text-secondary">{expiresAt || '—'}</p>
+            </div>
+            <div className="shrink-0">
+              <p className="text-text-faint text-xs font-mono mb-1">{t.plan.status}</p>
+              <p className={`font-medium flex items-center gap-1 ${(STATUS_DISPLAY[accountStatus] || STATUS_DISPLAY.OK).color}`}>
+                <span className="text-[10px]">{(STATUS_DISPLAY[accountStatus] || STATUS_DISPLAY.OK).icon}</span>
+                {(STATUS_DISPLAY[accountStatus] || STATUS_DISPLAY.OK).label}
+              </p>
             </div>
           </div>
 
@@ -430,9 +554,17 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
           {PLAN_ORDER.map((id) => {
             const isCurrent = id === currentPlan
             const price = PLAN_PRICES[id]
-            const targetIdx = PLAN_ORDER.indexOf(id)
-            const canUpgrade = targetIdx > currentIdx
+            const targetTier = PLAN_TIERS[id]
+            const currentTier = PLAN_TIERS[currentPlan]
+            const isHigher = targetTier > currentTier
+            const isLower = targetTier < currentTier && id !== 'free'
             const canCancel = id === 'free' && currentPlan !== 'free'
+
+            // Determine button state based on account status
+            const isPaying = accountStatus === 'WAIT_FOR_USER_PAYING'
+            const isBlocked = accountStatus === 'WAIT_FOR_OPERATION' || accountStatus === 'WAIT_FOR_REGISTER'
+            const pendingOrder = isPaying ? orders.find(o => o.status === 'PENDING' && o.productType === PLAN_TO_PRODUCT[id]) : null
+            const disableAll = isBlocked || (isPaying && !pendingOrder)
 
             return (
               <div
@@ -450,22 +582,37 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
                 <p className="text-[10px] text-text-faint mb-4">
                   {price > 0 ? <><span className="font-semibold">{t.plan.plusFeesBold}</span>{t.plan.plusFeesRest}</> : '\u00A0'}
                 </p>
-                {isCurrent ? (
+                {isCurrent && currentPlan !== 'free' && !isBlocked ? (
+                  <div className="w-full flex flex-col items-center gap-1.5">
+                    <span className="text-xs text-brand font-medium">{t.plan.current}</span>
+                    <button
+                      onClick={() => setModal({ step: 'cancel-confirm' })}
+                      className="w-full py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-colors bg-transparent border border-border-strong text-text-faint hover:text-red-500 hover:border-red-300"
+                    >
+                      {t.plan.cancelSubscription}
+                    </button>
+                  </div>
+                ) : isCurrent ? (
                   <span className="text-xs text-brand font-medium py-1.5">{t.plan.current}</span>
-                ) : canUpgrade ? (
+                ) : isPaying && pendingOrder ? (
+                  <button
+                    onClick={() => handleContinuePayment(id)}
+                    disabled={!!checkoutLoading}
+                    className="w-full py-2 rounded-lg text-xs font-medium cursor-pointer transition-opacity hover:opacity-90 bg-amber-500 text-white disabled:opacity-50"
+                  >
+                    {checkoutLoading ? '...' : t.plan.continuePaying}
+                  </button>
+                ) : isHigher && !disableAll ? (
                   <button
                     onClick={() => handleSelect(id)}
                     className="w-full py-2 rounded-lg text-xs font-medium cursor-pointer transition-opacity hover:opacity-90 bg-brand text-white"
                   >
                     {t.plan.upgrade}
                   </button>
-                ) : canCancel ? (
-                  <button
-                    onClick={() => handleSelect(id)}
-                    className="w-full py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors bg-transparent border border-border-strong text-text-muted hover:text-text-secondary"
-                  >
-                    {t.plan.cancelSubscription}
-                  </button>
+                ) : isLower || disableAll ? (
+                  <span className="w-full py-2 rounded-lg text-xs font-medium text-center text-text-faint opacity-40">
+                    {isLower ? '—' : t.plan.upgrade}
+                  </span>
                 ) : (
                   <span className="py-1.5">&nbsp;</span>
                 )}
@@ -584,15 +731,22 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
                 <div className="flex gap-3">
                   <button
                     onClick={() => setModal(null)}
-                    className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors"
+                    disabled={!!checkoutLoading}
+                    className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors disabled:opacity-50"
                   >
                     {t.plan.cancel}
                   </button>
                   <button
                     onClick={handleOverrideConfirm}
-                    className="flex-1 py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                    disabled={!!checkoutLoading}
+                    className="flex-1 py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
-                    {t.plan.confirmOverride}
+                    {checkoutLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        {t.plan.confirmOverride}
+                      </span>
+                    ) : t.plan.confirmOverride}
                   </button>
                 </div>
               </>
@@ -660,20 +814,97 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
               </div>
             )}
 
+            {/* Upgrade success (instant) */}
+            {modal.step === 'upgrade-success' && (
+              <div className="flex flex-col items-center py-4">
+                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-4">
+                  <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                </div>
+                <h3 className="font-serif text-base text-text mb-2">{t.plan.upgradeSuccessTitle}</h3>
+                <p className="text-sm text-text-muted text-center mb-1">
+                  {t.plan.upgradeSuccessDesc
+                    .replace('{from}', t.plan.productTypes[modal.previousPlan] || modal.previousPlan)
+                    .replace('{to}', t.plan.productTypes[modal.newPlan] || modal.newPlan)}
+                </p>
+                {modal.proratedPrice > 0 && (
+                  <p className="text-xs text-text-faint mb-4">
+                    {t.plan.upgradeProrated.replace('{amount}', `$${(modal.proratedPrice / 100).toFixed(2)}`)}
+                  </p>
+                )}
+                <button
+                  onClick={() => { setModal(null); onRefresh() }}
+                  className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity mt-2"
+                >
+                  {t.plan.ok}
+                </button>
+              </div>
+            )}
+
             {/* Cancel subscription */}
             {modal.step === 'cancel-confirm' && (
               <>
                 <h3 className="font-serif text-base text-text mb-2">{t.plan.cancelTitle}</h3>
                 <p className="text-sm text-text-muted mb-5">
-                  {t.plan.cancelDesc
-                    .replace('{plan}', planLabel(currentPlan))
-                    .replace('{date}', expiresAt || '—')}
+                  {t.plan.cancelConfirmDesc
+                    .replace('{plan}', planLabel(currentPlan))}
                 </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setModal(null)}
+                    className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors"
+                  >
+                    {t.plan.keepPlan}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      // Check if current subscription was via Helio
+                      const lastOrder = orders.find(o => o.status === 'COMPLETED' && o.orderType === 'SUBSCRIPTION')
+                      const isHelio = lastOrder?.paymentProvider === 'HELIO'
+
+                      try {
+                        track(EVENTS.SUBSCRIPTION_CANCELLED, { plan: currentPlan, provider: isHelio ? 'HELIO' : 'LEMONSQUEEZY' })
+                        const res = await window.electronAPI.payment.cancelSubscription(claudeAccountId)
+                        if (res.status >= 200 && res.status < 300) {
+                          if (isHelio) {
+                            setModal({ step: 'helio-cancel-warning' })
+                          } else {
+                            setModal(null)
+                          }
+                          onRefresh()
+                        } else {
+                          const errData = res.data as { message?: string } | undefined
+                          setModal({ step: 'error', message: typeof errData === 'object' && errData?.message ? errData.message : t.plan.cancelError })
+                        }
+                      } catch {
+                        setModal({ step: 'error', message: t.plan.cancelError })
+                      }
+                    }}
+                    className="flex-1 py-2 rounded-lg text-sm bg-red-500 text-white cursor-pointer hover:opacity-90 transition-opacity"
+                  >
+                    {t.plan.confirmCancel}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Helio cancel warning */}
+            {modal.step === 'helio-cancel-warning' && (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-2xl">⚠️</span>
+                  <h3 className="font-serif text-base text-red-600">{t.plan.helioCancelWarningTitle}</h3>
+                </div>
+                <p className="text-sm text-text-muted mb-3">{t.plan.helioCancelWarningDesc}</p>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4">
+                  <p className="text-xs text-red-700 font-medium">{t.plan.helioCancelWarningBold}</p>
+                </div>
                 <button
                   onClick={() => setModal(null)}
                   className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
                 >
-                  {t.plan.ok}
+                  {t.plan.helioCancelUnderstood}
                 </button>
               </>
             )}

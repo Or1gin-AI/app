@@ -200,6 +200,8 @@ export const zh = {
     email: '邮箱',
     currentPlan: '当前套餐',
     expiresAt: '到期时间',
+    status: '状态',
+    continuePaying: '继续支付',
     // Activation
     activationTitle: '激活服务',
     activationRemaining: '剩余次数',
@@ -255,7 +257,19 @@ export const zh = {
     // Cancel subscription
     cancelSubscription: '取消订阅',
     cancelTitle: '取消订阅',
+    cancelConfirmDesc: '确定要取消 {plan} 吗？取消后将立即失去访问权限。',
     cancelDesc: '您的 {plan} 将保持有效直至 {date}。如需取消，请联系 support@originai.cc 或通过支付平台管理您的订阅。',
+    keepPlan: '保留套餐',
+    confirmCancel: '确认取消',
+    cancelError: '取消订阅失败，请重试',
+    helioCancelWarningTitle: '重要提示',
+    helioCancelWarningDesc: '您的订阅已在本平台取消。但您可能仍会收到加密支付平台发送的续费邮件。',
+    helioCancelWarningBold: '请勿点击邮件中的续费链接！取消后的付款不会恢复您的订阅，也不会退款。',
+    helioCancelUnderstood: '我已了解',
+    // Upgrade success
+    upgradeSuccessTitle: '升级成功',
+    upgradeSuccessDesc: '您的套餐已从 {from} 升级为 {to}。',
+    upgradeProrated: '按比例扣费：{amount}',
     // Error
     errorTitle: '错误',
     checkoutError: '结账失败，请重试',
