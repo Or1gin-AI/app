@@ -23,7 +23,20 @@ func main() {
 	for {
 		time.Sleep(1 * time.Second)
 		if !processAlive(*pid) {
-			fmt.Printf("[helper] pid %d is gone, starting recovery\n", *pid)
+			fmt.Printf("[helper] pid %d is gone\n", *pid)
+
+			// Wait for normal exit cleanup to finish (before-quit runs async)
+			time.Sleep(2 * time.Second)
+
+			// Check if system proxy is still set to our port.
+			// If already cleared → normal exit happened → exit silently.
+			// If still set → crash happened → run recovery.
+			if !isProxySet(*port) {
+				fmt.Println("[helper] proxy already cleared (normal exit), exiting silently")
+				os.Exit(0)
+			}
+
+			fmt.Println("[helper] proxy still set (crash detected), starting recovery")
 			clearSystemProxy(*port)
 			if *xrayPid > 0 {
 				killProcess(*xrayPid)

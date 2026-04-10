@@ -5,8 +5,20 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
+
+func isProxySet(port int) bool {
+	out, err := exec.Command("scutil", "--proxy").Output()
+	if err != nil {
+		return false
+	}
+	s := string(out)
+	httpEnabled := regexp.MustCompile(`HTTPEnable\s*:\s*1`).MatchString(s)
+	portMatch := regexp.MustCompile(`HTTPPort\s*:\s*(\d+)`).FindStringSubmatch(s)
+	return httpEnabled && len(portMatch) > 1 && portMatch[1] == fmt.Sprintf("%d", port)
+}
 
 func clearSystemProxy(port int) {
 	fmt.Println("[helper] clearing system proxy on macOS")
