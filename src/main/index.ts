@@ -360,30 +360,17 @@ ipcMain.handle('check-proxy-ip', async () => {
 // --- Periodic health check (every 60s) ---
 let healthInterval: ReturnType<typeof setInterval> | null = null
 let healthRunning = false
-let consecutiveFailures = 0
 
 function startHealthCheck(): void {
   if (healthInterval) return
   healthRunning = true
-  consecutiveFailures = 0
   healthInterval = setInterval(async () => {
     if (!healthRunning) return
     const running = isSidecarRunning()
     const ip = running ? await fetchExitIpViaProxy() : null
     const ok = running && ip !== null
-
-    if (ok) {
-      consecutiveFailures = 0
-      broadcast('network-health', { ok: true, ip })
-    } else {
-      consecutiveFailures++
-      // Only report failure after 2 consecutive failures (debounce transient errors)
-      if (consecutiveFailures >= 2) {
-        broadcast('network-health', { ok: false, ip: null })
-      }
-      // On first failure: don't broadcast — wait for next check to confirm
-    }
-  }, 30_000) // Check every 30s (was 60s) since we now require 2 failures = ~1min before alarm
+    broadcast('network-health', { ok, ip })
+  }, 10_000)
 }
 
 function stopHealthCheck(): void {
