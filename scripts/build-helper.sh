@@ -13,9 +13,9 @@ HELPER_DIR="${SCRIPT_DIR}/../resources/helper"
 SIDECAR_DIR="${SCRIPT_DIR}/../resources/sidecar"
 FILTER="${1:-all}"
 
-# No network calls — pure stdlib, no external deps
-export GOPROXY=off
+# No external module deps — only allow toolchain downloads
 export GONOSUMCHECK="*"
+export GOFLAGS="-mod=mod"
 
 cd "$HELPER_DIR"
 
