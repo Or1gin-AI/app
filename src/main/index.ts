@@ -324,28 +324,30 @@ ipcMain.handle('check-proxy-ip', async () => {
 // --- Periodic health check (every 60s) ---
 let healthInterval: ReturnType<typeof setInterval> | null = null
 let healthRunning = false
-let healthNotified = false // only notify once per outage
+let consecutiveFailures = 0
 
 function startHealthCheck(): void {
   if (healthInterval) return
   healthRunning = true
-  healthNotified = false
+  consecutiveFailures = 0
   healthInterval = setInterval(async () => {
     if (!healthRunning) return
-    // Only OK if sidecar is running AND proxy exit IP is reachable
     const running = isSidecarRunning()
     const ip = running ? await fetchExitIpViaProxy() : null
     const ok = running && ip !== null
-    // Push to all renderer windows
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send('network-health', { ok, ip })
-      }
-    }
+
     if (ok) {
-      healthNotified = false // reset so next outage triggers notification
+      consecutiveFailures = 0
+      broadcast('network-health', { ok: true, ip })
+    } else {
+      consecutiveFailures++
+      // Only report failure after 2 consecutive failures (debounce transient errors)
+      if (consecutiveFailures >= 2) {
+        broadcast('network-health', { ok: false, ip: null })
+      }
+      // On first failure: don't broadcast — wait for next check to confirm
     }
-  }, 60_000)
+  }, 30_000) // Check every 30s (was 60s) since we now require 2 failures = ~1min before alarm
 }
 
 function stopHealthCheck(): void {
