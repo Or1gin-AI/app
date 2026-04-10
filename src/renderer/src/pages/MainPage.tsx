@@ -389,6 +389,8 @@ export function MainPage({ userName }: MainPageProps) {
             </p>
           </div>
 
+          <p className="text-[12px] text-red-500 mb-4 leading-relaxed">{t.main.claudeCode.newTerminalWarning}</p>
+
           <div className="text-[13px] text-text-secondary leading-relaxed">
             {[
               <>{t.main.claudeCode.step1} <code className="bg-bg-alt px-1.5 py-0.5 rounded text-xs text-brand">claude login</code></>,
