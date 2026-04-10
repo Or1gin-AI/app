@@ -267,16 +267,23 @@ function createWindow(): void {
 
 // --- IP detection helpers ---
 
-/** Fetch IP through user's normal network path (respects system proxy / Clash if active) */
-function fetchExitIpDirect(): Promise<string | null> {
-  const { execFile } = require('child_process') as typeof import('child_process')
-  return new Promise((resolve) => {
-    // No --noproxy: let curl use the user's system proxy (e.g. Clash) so we show their real browsing exit IP
-    execFile('curl', ['-4', '-s', '--max-time', '10', 'https://checkip.amazonaws.com'], (err, stdout) => {
-      if (err) { resolve(null); return }
-      resolve(stdout.trim() || null)
-    })
-  })
+/** Fetch IP via Electron net.fetch (uses session proxy if set, otherwise direct) */
+async function fetchExitIpDirect(): Promise<string | null> {
+  // Try multiple services for reliability
+  for (const url of ['https://checkip.amazonaws.com', 'https://api.ipify.org']) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 10_000)
+      const resp = await net.fetch(url, { signal: controller.signal })
+      clearTimeout(timer)
+      if (resp.ok) {
+        const text = await resp.text()
+        const ip = text.trim()
+        if (ip) return ip
+      }
+    } catch { /* try next */ }
+  }
+  return null
 }
 
 /** Fetch exit IP through proxy: ipify.org is whitelisted in Xray routing → goes through Trojan tunnel */
