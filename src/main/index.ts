@@ -286,14 +286,18 @@ async function fetchExitIpDirect(): Promise<string | null> {
   return null
 }
 
+/** Check if a string looks like an IPv4 address */
+function isValidIp(s: string): boolean {
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)
+}
+
 /** Fetch exit IP through proxy: ipify.org is whitelisted in Xray routing → goes through Trojan tunnel */
 async function fetchExitIpViaProxy(): Promise<string | null> {
   const port = getLocalPort()
   const http = require('node:http') as typeof import('node:http')
 
-  // Use Node.js http through our local proxy (cross-platform, no curl dependency)
   for (const host of ['api.ipify.org', 'api4.ipify.org']) {
-    const ip = await new Promise<string | null>((resolve) => {
+    const raw = await new Promise<string | null>((resolve) => {
       const req = http.request({
         host: '127.0.0.1',
         port,
@@ -309,7 +313,7 @@ async function fetchExitIpViaProxy(): Promise<string | null> {
       req.setTimeout(15_000, () => { req.destroy(); resolve(null) })
       req.end()
     })
-    if (ip) return ip
+    if (raw && isValidIp(raw)) return raw
   }
   return null
 }

@@ -297,6 +297,10 @@ export async function startSidecar(proxyPassword: string, preProxy?: string): Pr
   })
 }
 
+function isValidIp(s: string): boolean {
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)
+}
+
 /** Verify via Node.js http module through local proxy (cross-platform, no curl dependency) */
 function verifyViaHttp(targetHost: string): Promise<string | null> {
   const http = require('node:http') as typeof import('node:http')
@@ -310,7 +314,10 @@ function verifyViaHttp(targetHost: string): Promise<string | null> {
     }, (res) => {
       let data = ''
       res.on('data', (chunk: Buffer) => { data += chunk.toString() })
-      res.on('end', () => resolve(data.trim() || null))
+      res.on('end', () => {
+        const ip = data.trim()
+        resolve(isValidIp(ip) ? ip : null)
+      })
     })
     req.on('error', () => resolve(null))
     req.setTimeout(20_000, () => { req.destroy(); resolve(null) })
@@ -326,7 +333,8 @@ export async function verifySidecar(): Promise<{ ok: boolean; ip?: string; error
   const curlResult = await new Promise<string | null>((resolve) => {
     exec('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${LOCAL_HTTP_PORT}`, 'https://api.ipify.org'],
       (err, stdout) => {
-        resolve(!err && stdout ? stdout.trim() : null)
+        const ip = !err && stdout ? stdout.trim() : ''
+        resolve(isValidIp(ip) ? ip : null)
       }
     )
   })
@@ -445,16 +453,26 @@ export function startHelper(): void {
   ]
 
   console.log('[helper] starting:', binary, args.join(' '))
-  helperProcess = spawn(binary, args, {
-    stdio: 'ignore', // fully detach — no pipes that break on parent exit
-    detached: true,
-    windowsHide: true,
-  })
+  try {
+    helperProcess = spawn(binary, args, {
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true,
+    })
 
-  helperProcess.on('error', () => { helperProcess = null })
+    helperProcess.on('error', (err) => {
+      console.error('[helper] spawn error:', err.message)
+      helperProcess = null
+    })
 
-  // Unref so helper doesn't prevent Electron from exiting
-  helperProcess.unref()
+    console.log('[helper] spawned pid:', helperProcess.pid)
+
+    // Unref so helper doesn't prevent Electron from exiting
+    helperProcess.unref()
+  } catch (err) {
+    console.error('[helper] failed to spawn:', err)
+    helperProcess = null
+  }
 }
 
 export function stopHelper(): void {
