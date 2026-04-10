@@ -42,8 +42,6 @@ interface TimelineEntry {
 type PanelView = 'list' | 'create' | 'detail'
 
 interface TicketPanelProps {
-  userId: string
-  userName: string
   onClose: () => void
 }
 
@@ -63,7 +61,7 @@ function relativeTime(iso: string): string {
 
 // ── Component ──────────────────────────────────────────────────────
 
-export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
+export function TicketPanel({ onClose }: TicketPanelProps) {
   const { t } = useLocale()
 
   const [view, setView] = useState<PanelView>('list')
@@ -97,7 +95,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     try {
       const params = new URLSearchParams({ page: '1', limit: '50' })
       if (filter !== 'all') params.set('status', filter)
-      const res = await window.electronAPI.ticket.list(userId, userName, params.toString())
+      const res = await window.electronAPI.ticket.list(params.toString())
       if (res.status >= 200 && res.status < 300) {
         const data = res.data as { data?: Ticket[]; total?: number }
         setTickets(data.data || [])
@@ -110,7 +108,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     } finally {
       setTicketsLoading(false)
     }
-  }, [filter, userId, userName])
+  }, [filter])
 
   useEffect(() => {
     if (view === 'list') fetchTickets()
@@ -122,7 +120,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     async (ticketId: string) => {
       setTimelineLoading(true)
       try {
-        const res = await window.electronAPI.ticket.timeline(userId, userName, ticketId)
+        const res = await window.electronAPI.ticket.timeline(ticketId)
         if (res.status >= 200 && res.status < 300) {
           const data = res.data
           setTimeline(Array.isArray(data) ? data : [])
@@ -133,7 +131,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
         setTimelineLoading(false)
       }
     },
-    [userId, userName]
+    []
   )
 
   const openDetail = useCallback(
@@ -160,7 +158,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     setFormSubmitting(true)
     setFormMsg(null)
     try {
-      const res = await window.electronAPI.ticket.create(userId, userName, {
+      const res = await window.electronAPI.ticket.create({
         title: formTitle.trim(),
         description: formDesc.trim(),
         type: formType,
@@ -182,7 +180,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     } finally {
       setFormSubmitting(false)
     }
-  }, [formTitle, formDesc, formType, userId, userName, t])
+  }, [formTitle, formDesc, formType, t])
 
   // ── Post comment ──
 
@@ -191,8 +189,6 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     setCommentSending(true)
     try {
       const res = await window.electronAPI.ticket.comment(
-        userId,
-        userName,
         selectedTicket.id,
         commentText.trim()
       )
@@ -205,7 +201,7 @@ export function TicketPanel({ userId, userName, onClose }: TicketPanelProps) {
     } finally {
       setCommentSending(false)
     }
-  }, [commentText, selectedTicket, userId, userName, fetchTimeline])
+  }, [commentText, selectedTicket, fetchTimeline])
 
   // ── Status helpers ──
 
