@@ -9,6 +9,19 @@ import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } f
 import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, scanLocalPorts } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!gotSingleInstanceLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  if (!win.isVisible()) win.show()
+  win.focus()
+})
 
 // ── App settings (remember password, auto-login, auto-launch) ──
 
@@ -956,6 +969,7 @@ ipcMain.handle('updater:check', () => {
 })
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return
   // Clean up any orphaned processes left by a previous crash
   killOrphanedSidecar()
   await killOrphanedHelper()
