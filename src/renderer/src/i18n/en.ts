@@ -137,6 +137,7 @@ export const en = {
       requesting: 'Extracting link...',
       success: 'Login link opened in browser',
       noEmail: 'No login link received. Make sure you requested login on claude.ai first.',
+      noEmailYet: 'No login link yet, checking...',
       noLink: 'No login link found in email',
       retryAfter: 'Retry in {time}',
       errorGeneric: 'Failed to fetch login link',

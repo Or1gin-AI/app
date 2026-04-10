@@ -6,12 +6,11 @@ interface MainPageProps {
 }
 
 // idle       → show "获取登录链接"
-// checking   → loading spinner, fetching emails
-// no-email   → no valid email, 60s cooldown then back to idle
-// has-email  → email found (<5min), extract link, show URL + copy + open
+// checking   → polling every 10s, "暂未收到登录链接"
+// has-email  → email found, show link + copy + open
 // requesting → opening link
 // success    → link opened
-type EmailPhase = 'idle' | 'checking' | 'no-email' | 'has-email' | 'requesting' | 'success'
+type EmailPhase = 'idle' | 'checking' | 'has-email' | 'requesting' | 'success'
 
 type EmailItem = { from: string; subject: string; body: string; date: string }
 
@@ -44,49 +43,26 @@ function truncateUrl(url: string, maxLen = 40): string {
 export function MainPage({ userName }: MainPageProps) {
   const { t } = useLocale()
   const [phase, setPhase] = useState<EmailPhase>('idle')
-  const [cooldown, setCooldown] = useState(0)
   const [latestEmail, setLatestEmail] = useState<EmailItem | null>(null)
   const [magicLink, setMagicLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
   const [, setTick] = useState(0)
   const busyRef = useRef(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Cleanup
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
+      if (pollRef.current) clearInterval(pollRef.current)
       if (ageTickRef.current) clearInterval(ageTickRef.current)
     }
   }, [])
 
-  // Countdown ticker
-  useEffect(() => {
-    if (cooldown <= 0) {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
-      return
-    }
-    timerRef.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null } }
-  }, [cooldown > 0]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When cooldown expires → no-email goes back to idle
-  useEffect(() => {
-    if (cooldown > 0) return
-    if (phase === 'no-email') {
-      setPhase('idle')
-    }
-  }, [cooldown, phase])
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }, [])
 
   // Tick every 15s to update relative time when has-email
   useEffect(() => {
@@ -103,11 +79,10 @@ export function MainPage({ userName }: MainPageProps) {
     return () => { if (ageTickRef.current) { clearInterval(ageTickRef.current); ageTickRef.current = null } }
   }, [phase, latestEmail])
 
-  /** Fetch emails from backend */
-  const fetchEmails = useCallback(async () => {
-    if (busyRef.current) return
+  /** Single fetch attempt — returns true if email found */
+  const tryFetchEmail = useCallback(async (): Promise<boolean> => {
+    if (busyRef.current) return false
     busyRef.current = true
-    setPhase('checking')
 
     try {
       let res = await window.electronAPI.claudeAccount.listenEmail()
@@ -122,11 +97,7 @@ export function MainPage({ userName }: MainPageProps) {
         }
       }
 
-      if (res.status < 200 || res.status >= 300) {
-        setPhase('no-email')
-        setCooldown(60)
-        return
-      }
+      if (res.status < 200 || res.status >= 300) return false
 
       // Handle both array and { emails: [...] } wrapper formats
       let emails: EmailItem[]
@@ -138,32 +109,39 @@ export function MainPage({ userName }: MainPageProps) {
         emails = []
       }
 
-      if (emails.length === 0) {
-        setPhase('no-email')
-        setCooldown(60)
-        return
-      }
+      if (emails.length === 0) return false
 
       const latest = emails[0]
       const diffMin = (Date.now() - new Date(latest.date).getTime()) / 60_000
-
-      if (diffMin >= 5) {
-        setPhase('no-email')
-        setCooldown(60)
-        return
-      }
+      if (diffMin >= 5) return false
 
       const link = extractMagicLink(latest.body)
       setLatestEmail(latest)
       setMagicLink(link)
       setPhase('has-email')
+      stopPolling()
+      return true
     } catch {
-      setPhase('no-email')
-      setCooldown(60)
+      return false
     } finally {
       busyRef.current = false
     }
-  }, [])
+  }, [stopPolling])
+
+  /** Start polling: check once immediately, then every 10s */
+  const startPolling = useCallback(async () => {
+    stopPolling()
+    setPhase('checking')
+
+    // First attempt immediately
+    const found = await tryFetchEmail()
+    if (found) return
+
+    // Poll every 10s
+    pollRef.current = setInterval(async () => {
+      await tryFetchEmail()
+    }, 10_000)
+  }, [tryFetchEmail, stopPolling])
 
   const handleOpenLink = useCallback(() => {
     if (!magicLink) return
@@ -181,14 +159,8 @@ export function MainPage({ userName }: MainPageProps) {
   const handleRefetch = useCallback(() => {
     setLatestEmail(null)
     setMagicLink(null)
-    fetchEmails()
-  }, [fetchEmails])
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-    const s = seconds % 60
-    return `${m}:${s.toString().padStart(2, '0')}`
-  }
+    startPolling()
+  }, [startPolling])
 
   const claudeEmail = t.main.claudeWeb.step2email.replace('{name}', userName || '···')
 
@@ -235,7 +207,7 @@ export function MainPage({ userName }: MainPageProps) {
       case 'idle':
         return (
           <button
-            onClick={fetchEmails}
+            onClick={startPolling}
             className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
           >
             {t.main.claudeWeb.fetchEmail}
@@ -244,32 +216,17 @@ export function MainPage({ userName }: MainPageProps) {
 
       case 'checking':
         return (
-          <button
-            disabled
-            className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand/40 text-white/60 cursor-not-allowed"
-          >
-            <span className="flex items-center justify-center gap-2">
-              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {t.main.claudeWeb.fetchingEmail}
-            </span>
-          </button>
-        )
-
-      case 'no-email':
-        return (
           <>
             <button
               disabled
               className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand/40 text-white/60 cursor-not-allowed"
             >
-              {t.main.claudeWeb.fetchEmail}
+              <span className="flex items-center justify-center gap-2">
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                {t.main.claudeWeb.fetchingEmail}
+              </span>
             </button>
-            <p className="text-xs text-amber-600 mt-2">{t.main.claudeWeb.noEmail}</p>
-            {cooldown > 0 && (
-              <p className="text-xs text-text-faint mt-1">
-                {t.main.claudeWeb.retryAfter.replace('{time}', formatTime(cooldown))}
-              </p>
-            )}
+            <p className="text-xs text-text-faint mt-2">{t.main.claudeWeb.noEmailYet}</p>
           </>
         )
 
@@ -355,7 +312,7 @@ export function MainPage({ userName }: MainPageProps) {
         return (
           <>
             <button
-              onClick={() => { setPhase('idle'); setLatestEmail(null); setMagicLink(null) }}
+              onClick={() => { setPhase('idle'); setLatestEmail(null); setMagicLink(null); stopPolling() }}
               className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
             >
               {t.main.claudeWeb.fetchEmail}
