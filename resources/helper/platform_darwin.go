@@ -1,0 +1,41 @@
+//go:build darwin
+
+package main
+
+import (
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
+func clearSystemProxy(port int) {
+	fmt.Println("[helper] clearing system proxy on macOS")
+
+	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	services := []string{"Wi-Fi", "Ethernet"}
+	if err == nil {
+		lines := strings.Split(string(out), "\n")
+		var parsed []string
+		for _, line := range lines[1:] {
+			s := strings.TrimSpace(line)
+			if s != "" && !strings.HasPrefix(s, "*") {
+				parsed = append(parsed, s)
+			}
+		}
+		if len(parsed) > 0 {
+			services = parsed
+		}
+	}
+
+	for _, svc := range services {
+		exec.Command("networksetup", "-setwebproxystate", svc, "off").Run()
+		exec.Command("networksetup", "-setsecurewebproxystate", svc, "off").Run()
+		fmt.Printf("[helper] proxy disabled on: %s\n", svc)
+	}
+}
+
+func showDialog() {
+	msg := "OriginAI 已异常退出，系统代理已自动恢复。\\n请立即停止使用 Claude 相关产品，并重新启动 OriginAI。"
+	script := fmt.Sprintf(`display dialog "%s" with title "OriginAI" buttons {"OK"} default button "OK" with icon caution`, msg)
+	exec.Command("osascript", "-e", script).Run()
+}
