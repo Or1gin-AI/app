@@ -43,6 +43,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   const [preProxyHost, setPreProxyHost] = useState('127.0.0.1')
   const [preProxyPort, setPreProxyPort] = useState('7890')
   const [_lastProxyAddr, setLastProxyAddr] = useState('')
+  const [probeLatency, setProbeLatency] = useState<number | null>(null)
 
   // Detect IP on mount
   useEffect(() => {
@@ -66,24 +67,40 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     setProgress(0)
     setStep(0)
     setOptimizeError(null)
+    setProbeLatency(null)
 
     // Step 0: detect (already done)
     setStep(0)
-    setProgress(15)
+    setProgress(10)
 
-    // Step 1: start xray
+    // Step 1: probe pre-proxy latency (skip for direct mode)
     setStep(1)
+    setProgress(20)
+    if (proxyAddr !== 'direct') {
+      const [host, portStr] = proxyAddr.split(':')
+      const port = parseInt(portStr, 10) || 7890
+      const probe = await window.electronAPI.sidecar.probePreProxy(host, port)
+      if (!probe.ok) {
+        setOptimizeError(`${t.network.probeFailedPrefix}${proxyAddr}${t.network.probeFailedSuffix}${probe.error || ''}`)
+        return
+      }
+      setProbeLatency(probe.latency ?? null)
+    }
     setProgress(30)
+
+    // Step 2: start xray
+    setStep(2)
+    setProgress(45)
     const startResult = await window.electronAPI.sidecar.start(proxyAddr)
     if (!startResult.ok) {
       setOptimizeError(startResult.error || 'Failed to start proxy')
       return
     }
-    setProgress(60)
+    setProgress(65)
 
-    // Step 2: verify connection through proxy
-    setStep(2)
-    setProgress(70)
+    // Step 3: verify connection through proxy
+    setStep(3)
+    setProgress(75)
     const verifyResult = await window.electronAPI.sidecar.verify()
     console.log('*************************************8')
     console.log(verifyResult)
@@ -93,13 +110,14 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     }
     setProgress(90)
 
-    // Step 3: done
-    setStep(3)
+    // Step 4: done
+    setStep(4)
     setProgress(100)
-  }, [])
+  }, [t])
 
   const steps = [
     t.network.stepDetect,
+    t.network.stepProbe,
     t.network.stepStart,
     t.network.stepVerify,
     t.network.stepDone,
@@ -409,7 +427,12 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
           </div>
           <div className="text-[11px] text-text-faint font-mono leading-[1.8]">
             {steps.map((label, i) => (
-              <div key={i}>{stepIcon(i)} {label}</div>
+              <div key={i}>
+                {stepIcon(i)} {label}
+                {i === 1 && probeLatency !== null && step > 1 && (
+                  <span className="text-green-600 ml-1">({probeLatency}ms)</span>
+                )}
+              </div>
             ))}
           </div>
         </div>
