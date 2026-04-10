@@ -212,6 +212,10 @@ export async function startSidecar(proxyPassword: string, preProxy?: string): Pr
     const proxy = preProxy || DEFAULT_PRE_PROXY
     const [host, portStr] = proxy.split(':')
     const port = parseInt(portStr, 10) || 7890
+    // Safety: reject if upstream points to our own port (would cause infinite loop)
+    if (port === LOCAL_PORT) {
+      return { ok: false, error: `Upstream proxy port ${port} conflicts with local proxy port` }
+    }
     config = generateConfig(proxyPassword, host, port)
   }
   const configDir = getConfigDir()

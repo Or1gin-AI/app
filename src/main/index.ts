@@ -403,6 +403,7 @@ ipcMain.handle('session:stop-check', () => { stopSessionCheck(); return { ok: tr
 // Detect system HTTP proxy
 ipcMain.handle('detect-system-proxy', async () => {
   const { execSync } = await import('child_process')
+  const ourPort = String(getLocalPort())
   try {
     if (process.platform === 'darwin') {
       const out = execSync('scutil --proxy', { encoding: 'utf-8' })
@@ -411,6 +412,8 @@ ipcMain.handle('detect-system-proxy', async () => {
       const hostMatch = out.match(/HTTPProxy\s*:\s*(.+)/)
       const portMatch = out.match(/HTTPPort\s*:\s*(\d+)/)
       if (hostMatch && portMatch) {
+        // Ignore our own proxy — don't feed it back as upstream (causes loop)
+        if (portMatch[1].trim() === ourPort) return { found: false }
         return { found: true, host: hostMatch[1].trim(), port: portMatch[1].trim() }
       }
     } else if (process.platform === 'win32') {
@@ -428,6 +431,7 @@ ipcMain.handle('detect-system-proxy', async () => {
       if (match) {
         const val = match[1].trim()
         const [host, port] = val.includes(':') ? val.split(':') : [val, '80']
+        if (port === ourPort) return { found: false }
         return { found: true, host, port }
       }
     }
@@ -736,6 +740,14 @@ function stopProxyMonitor(): void {
 }
 
 ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
+  // Clear any stale proxy from a previous attempt BEFORE doing anything.
+  // This prevents: 1) authFetch routing through dead/looping proxy,
+  // 2) detect-system-proxy picking up our own port as "user's Clash"
+  for (const win of BrowserWindow.getAllWindows()) {
+    await win.webContents.session.setProxy({ mode: 'direct' })
+  }
+  await clearSystemProxy().catch(() => {})
+
   const authRes = await authFetch('GET', '/api/proxy-auth/login')
   if (authRes.status !== 200) {
     const errData = authRes.data as { message?: string } | undefined
