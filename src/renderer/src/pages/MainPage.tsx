@@ -47,21 +47,25 @@ export function MainPage({ userName }: MainPageProps) {
   const [magicLink, setMagicLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
+  const [pollFailed, setPollFailed] = useState(false)
   const [, setTick] = useState(0)
   const busyRef = useRef(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ageTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Cleanup
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current)
       if (ageTickRef.current) clearInterval(ageTickRef.current)
     }
   }, [])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    if (pollTimeoutRef.current) { clearTimeout(pollTimeoutRef.current); pollTimeoutRef.current = null }
   }, [])
 
   // Tick every 15s to update relative time when has-email
@@ -128,10 +132,11 @@ export function MainPage({ userName }: MainPageProps) {
     }
   }, [stopPolling])
 
-  /** Start polling: check once immediately, then every 10s */
+  /** Start polling: check once immediately, then every 10s, give up after 60s */
   const startPolling = useCallback(async () => {
     stopPolling()
     setPhase('checking')
+    setPollFailed(false)
 
     // First attempt immediately
     const found = await tryFetchEmail()
@@ -141,6 +146,13 @@ export function MainPage({ userName }: MainPageProps) {
     pollRef.current = setInterval(async () => {
       await tryFetchEmail()
     }, 10_000)
+
+    // Give up after 60s
+    pollTimeoutRef.current = setTimeout(() => {
+      stopPolling()
+      setPhase('idle')
+      setPollFailed(true)
+    }, 60_000)
   }, [tryFetchEmail, stopPolling])
 
   const handleOpenLink = useCallback(() => {
@@ -206,12 +218,17 @@ export function MainPage({ userName }: MainPageProps) {
     switch (phase) {
       case 'idle':
         return (
-          <button
-            onClick={startPolling}
-            className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
-          >
-            {t.main.claudeWeb.fetchEmail}
-          </button>
+          <>
+            <button
+              onClick={startPolling}
+              className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+            >
+              {t.main.claudeWeb.fetchEmail}
+            </button>
+            {pollFailed && (
+              <p className="text-xs text-amber-600 mt-2">{t.main.claudeWeb.noEmail}</p>
+            )}
+          </>
         )
 
       case 'checking':
