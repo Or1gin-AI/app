@@ -287,17 +287,31 @@ async function fetchExitIpDirect(): Promise<string | null> {
 }
 
 /** Fetch exit IP through proxy: ipify.org is whitelisted in Xray routing → goes through Trojan tunnel */
-function fetchExitIpViaProxy(): Promise<string | null> {
-  const { execFile } = require('child_process') as typeof import('child_process')
+async function fetchExitIpViaProxy(): Promise<string | null> {
   const port = getLocalPort()
-  return new Promise((resolve) => {
-    execFile('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${port}`, 'https://api.ipify.org'],
-      (err, stdout) => {
-        if (err) { resolve(null); return }
-        resolve(stdout.trim() || null)
-      }
-    )
-  })
+  const http = require('node:http') as typeof import('node:http')
+
+  // Use Node.js http through our local proxy (cross-platform, no curl dependency)
+  for (const host of ['api.ipify.org', 'api4.ipify.org']) {
+    const ip = await new Promise<string | null>((resolve) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port,
+        path: `http://${host}/`,
+        method: 'GET',
+        headers: { Host: host },
+      }, (res) => {
+        let data = ''
+        res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+        res.on('end', () => resolve(data.trim() || null))
+      })
+      req.on('error', () => resolve(null))
+      req.setTimeout(15_000, () => { req.destroy(); resolve(null) })
+      req.end()
+    })
+    if (ip) return ip
+  }
+  return null
 }
 
 // Full IP check: always direct (used by NetworkSetupPage initial detection)
