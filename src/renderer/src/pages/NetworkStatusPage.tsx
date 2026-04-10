@@ -16,6 +16,8 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
   const [proxyOk, setProxyOk] = useState(false)
   const [proxyPort, setProxyPort] = useState<number>(0)
   const [conflict, setConflict] = useState(false)
+  const [showStopModal, setShowStopModal] = useState(false)
+  const [stopping, setStopping] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -37,13 +39,20 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
 
     check()
 
-    // Listen for proxy conflict events
     const unsub = window.electronAPI.proxy.onConflict(() => {
       setConflict(true)
     })
 
     return () => { cancelled = true; unsub() }
   }, [])
+
+  const handleStopConfirm = async () => {
+    setStopping(true)
+    await window.electronAPI.sidecar.stop()
+    setStopping(false)
+    setShowStopModal(false)
+    onReconfigure()
+  }
 
   if (loading) {
     return (
@@ -103,21 +112,50 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
               {t.networkStatus.back}
             </button>
             <button
-              onClick={onReconfigure}
-              className="px-6 py-2.5 bg-bg-card border border-border text-text-secondary rounded-lg text-sm cursor-pointer hover:border-brand/40 transition-colors"
+              onClick={() => setShowStopModal(true)}
+              className="px-6 py-2.5 bg-bg-card border border-border text-text-secondary rounded-lg text-sm cursor-pointer hover:border-red-400/40 hover:text-red-500 transition-colors"
             >
-              {t.networkStatus.reconfigure}
+              {t.networkStatus.stopOptimization}
             </button>
           </>
         ) : (
           <button
-            onClick={onReconfigure}
+            onClick={() => setShowStopModal(true)}
             className="px-6 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
           >
-            {t.networkStatus.reconfigure}
+            {t.networkStatus.stopOptimization}
           </button>
         )}
       </div>
+
+      {/* Stop optimization confirmation modal */}
+      {showStopModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-bg-card rounded-2xl border border-border shadow-xl w-[360px] p-6">
+            <h3 className="font-serif text-lg text-text mb-2">{t.networkStatus.stopModalTitle}</h3>
+            <p className="text-[13px] text-text-muted mb-6 leading-relaxed">
+              {t.networkStatus.stopModalDesc}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowStopModal(false)}
+                disabled={stopping}
+                className="px-5 py-2 bg-bg-alt border border-border text-text-secondary rounded-lg text-sm cursor-pointer hover:border-brand/40 transition-colors disabled:opacity-50"
+              >
+                {t.networkStatus.stopModalCancel}
+              </button>
+              <button
+                onClick={handleStopConfirm}
+                disabled={stopping}
+                className="px-5 py-2 bg-red-500 text-white rounded-lg text-sm font-medium cursor-pointer hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {stopping && <VscLoading size={14} className="animate-spin" />}
+                {t.networkStatus.stopModalConfirm}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
