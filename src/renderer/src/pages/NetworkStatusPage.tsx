@@ -8,20 +8,6 @@ interface NetworkStatusPageProps {
   onReconfigure: () => void
 }
 
-function latencyColor(ms: number | null): string {
-  if (ms === null) return 'text-red-500'
-  if (ms < 100) return 'text-green-600'
-  if (ms < 300) return 'text-yellow-500'
-  return 'text-red-500'
-}
-
-function latencyDot(ms: number | null): string {
-  if (ms === null) return 'bg-red-500'
-  if (ms < 100) return 'bg-green-500'
-  if (ms < 300) return 'bg-yellow-500'
-  return 'bg-red-500'
-}
-
 export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPageProps) {
   const { t } = useLocale()
   const [loading, setLoading] = useState(true)
@@ -29,9 +15,6 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
   const [proxyIp, setProxyIp] = useState<string | null>(null)
   const [proxyOk, setProxyOk] = useState(false)
   const [proxyPort, setProxyPort] = useState<number>(0)
-  const [preProxy, setPreProxy] = useState<string | null>(null)
-  const [preProxyLatency, setPreProxyLatency] = useState<number | null>(null)
-  const [preProxyError, setPreProxyError] = useState(false)
   const [conflict, setConflict] = useState(false)
   const [showStopModal, setShowStopModal] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -60,23 +43,6 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
       setProxyIp(proxyRes.ip)
       setProxyOk(proxyRes.ok)
       setProxyPort(statusRes.port)
-      setPreProxy(statusRes.preProxy)
-
-      // Probe upstream latency if pre-proxy is configured
-      if (statusRes.preProxy) {
-        const [host, portStr] = statusRes.preProxy.split(':')
-        const port = parseInt(portStr, 10) || 7890
-        const probe = await window.electronAPI.sidecar.probePreProxy(host, port)
-        if (!cancelled) {
-          if (probe.ok) {
-            setPreProxyLatency(probe.latency ?? null)
-            setPreProxyError(false)
-          } else {
-            setPreProxyLatency(null)
-            setPreProxyError(true)
-          }
-        }
-      }
 
       setLoading(false)
     }
@@ -128,17 +94,6 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
               {proxyOk ? t.networkStatus.running : t.networkStatus.stopped}
             </span>
           </div>
-          {preProxy && (
-            <div className="flex items-center justify-between">
-              <span className="text-text-faint text-[11px]">{t.networkStatus.upstreamProxy}</span>
-              <span className="flex items-center gap-1.5">
-                <span className={`w-[6px] h-[6px] rounded-full ${latencyDot(preProxyError ? null : preProxyLatency)}`} />
-                <span className={latencyColor(preProxyError ? null : preProxyLatency)}>
-                  {preProxyError ? `${preProxy} (-)` : `${preProxy} (${preProxyLatency}ms)`}
-                </span>
-              </span>
-            </div>
-          )}
           <div className="flex items-center justify-between">
             <span className="text-text-faint text-[11px]">{t.networkStatus.systemProxy}</span>
             <span className={conflict ? 'text-red-500' : 'text-green-600'}>

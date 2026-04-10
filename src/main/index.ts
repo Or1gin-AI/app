@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, scanLocalPorts } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
@@ -283,28 +283,174 @@ function createWindow(): void {
 
 // --- IP detection helpers ---
 
-/** Fetch IP via Electron net.fetch (uses session proxy if set, otherwise direct) */
-async function fetchExitIpDirect(): Promise<string | null> {
-  // Try multiple services for reliability
-  for (const url of ['https://checkip.amazonaws.com', 'https://api.ipify.org']) {
-    try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 10_000)
-      const resp = await net.fetch(url, { signal: controller.signal })
-      clearTimeout(timer)
-      if (resp.ok) {
-        const text = await resp.text()
-        const ip = text.trim()
-        if (ip) return ip
-      }
-    } catch { /* try next */ }
-  }
-  return null
-}
-
 /** Check if a string looks like an IPv4 address */
 function isValidIp(s: string): boolean {
   return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+}
+
+function fetchTextDirect(urlString: string, timeoutMs = 5_000): Promise<string | null> {
+  const { request: httpRequest } = require('node:http') as typeof import('node:http')
+  const { request: httpsRequest } = require('node:https') as typeof import('node:https')
+  const url = new URL(urlString)
+  const request = url.protocol === 'https:' ? httpsRequest : httpRequest
+
+  return new Promise((resolve) => {
+    const req = request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || undefined,
+        path: `${url.pathname}${url.search}`,
+        method: 'GET',
+        headers: {
+          'User-Agent': `OriginAI/${app.getVersion()}`,
+          'Accept': 'text/plain, application/json;q=0.9, */*;q=0.8',
+        },
+      },
+      (res) => {
+        if ((res.statusCode || 0) >= 300 && (res.statusCode || 0) < 400 && res.headers.location) {
+          const next = new URL(res.headers.location, url).toString()
+          res.resume()
+          void fetchTextDirect(next, timeoutMs).then(resolve)
+          return
+        }
+
+        let data = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => { data += chunk })
+        res.on('end', () => resolve(data.trim() || null))
+      }
+    )
+
+    req.on('error', () => resolve(null))
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      resolve(null)
+    })
+    req.end()
+  })
+}
+
+async function fetchJsonDirect(url: string, timeoutMs = 5_000): Promise<Record<string, unknown> | null> {
+  const text = await fetchTextDirect(url, timeoutMs)
+  if (!text) return null
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** Fetch IP directly, bypassing any in-app proxy logic. */
+async function fetchExitIpDirect(): Promise<string | null> {
+  const candidates = [
+    'https://api.ipify.org',
+    'https://api4.ipify.org',
+    'https://checkip.amazonaws.com',
+    'https://ipv4.icanhazip.com',
+  ]
+
+  for (const url of candidates) {
+    const raw = await fetchTextDirect(url, 5_000)
+    const ip = raw?.trim() || ''
+    if (isValidIp(ip)) return ip
+  }
+
+  return null
+}
+
+interface DirectIpInfo {
+  ip: string
+  country: string
+  countryCode: string
+  region: string
+  city: string
+  isp: string
+  org: string
+  as: string
+  isProxy: boolean
+  isHosting: boolean
+  isMobile: boolean
+  isChina: boolean
+}
+
+function normalizeIpApi(rawIp: string, data: Record<string, unknown>): DirectIpInfo | null {
+  if (data.status !== 'success' || typeof data.countryCode !== 'string') return null
+  const countryCode = String(data.countryCode || '')
+  return {
+    ip: rawIp,
+    country: String(data.country || 'Unknown'),
+    countryCode,
+    region: String(data.regionName || ''),
+    city: String(data.city || ''),
+    isp: String(data.isp || ''),
+    org: String(data.org || ''),
+    as: String(data.as || ''),
+    isProxy: Boolean(data.proxy),
+    isHosting: Boolean(data.hosting),
+    isMobile: Boolean(data.mobile),
+    isChina: countryCode === 'CN',
+  }
+}
+
+function normalizeIpApiCo(rawIp: string, data: Record<string, unknown>): DirectIpInfo | null {
+  const countryCode = String(data.country_code || '')
+  if (!countryCode || data.error) return null
+  return {
+    ip: rawIp,
+    country: String(data.country_name || data.country || 'Unknown'),
+    countryCode,
+    region: String(data.region || ''),
+    city: String(data.city || ''),
+    isp: String(data.org || ''),
+    org: String(data.org || ''),
+    as: String(data.asn || ''),
+    isProxy: false,
+    isHosting: false,
+    isMobile: false,
+    isChina: countryCode === 'CN',
+  }
+}
+
+async function lookupDirectIpInfo(rawIp: string): Promise<DirectIpInfo | null> {
+  const fields = [
+    'status', 'message', 'query', 'country', 'countryCode',
+    'regionName', 'city', 'isp', 'org', 'as', 'proxy', 'hosting', 'mobile'
+  ].join(',')
+
+  const providers: Array<() => Promise<DirectIpInfo | null>> = [
+    async () => {
+      const data = await fetchJsonDirect(`http://ip-api.com/json/${rawIp}?fields=${fields}&lang=zh-CN`, 5_000)
+      return data ? normalizeIpApi(rawIp, data) : null
+    },
+    async () => {
+      const data = await fetchJsonDirect(`https://ipapi.co/${rawIp}/json/`, 5_000)
+      return data ? normalizeIpApiCo(rawIp, data) : null
+    },
+  ]
+
+  for (const provider of providers) {
+    const result = await provider()
+    if (result) return result
+  }
+
+  return null
 }
 
 /** Fetch exit IP through proxy: ipify.org is whitelisted in Xray routing → goes through Trojan tunnel */
@@ -337,34 +483,13 @@ async function fetchExitIpViaProxy(): Promise<string | null> {
 // Full IP check: always direct (used by NetworkSetupPage initial detection)
 ipcMain.handle('check-ip', async () => {
   try {
-    const rawIp = await fetchExitIpDirect()
-    if (!rawIp) throw new Error('Cannot reach proxy endpoint')
+    const rawIp = await withTimeout(fetchExitIpDirect(), 12_000, 'exit IP detection')
+    if (!rawIp) throw new Error('Could not determine exit IP')
 
-    const fields = [
-      'status', 'message', 'query', 'country', 'countryCode',
-      'regionName', 'city', 'isp', 'org', 'as', 'proxy', 'hosting', 'mobile'
-    ].join(',')
+    const info = await withTimeout(lookupDirectIpInfo(rawIp), 12_000, 'IP geolocation')
+    if (!info) throw new Error('Could not determine IP location')
 
-    const infoResp = await net.fetch(
-      `http://ip-api.com/json/${rawIp}?fields=${fields}&lang=zh-CN`
-    )
-    const data = await infoResp.json()
-    if (data.status === 'fail') throw new Error(data.message)
-
-    return {
-      ip: rawIp,
-      country: data.country,
-      countryCode: data.countryCode,
-      region: data.regionName,
-      city: data.city,
-      isp: data.isp,
-      org: data.org,
-      as: data.as,
-      isProxy: data.proxy,
-      isHosting: data.hosting,
-      isMobile: data.mobile,
-      isChina: data.countryCode === 'CN',
-    }
+    return info
   } catch (err) {
     return { error: String(err) }
   }
@@ -428,32 +553,45 @@ ipcMain.handle('health:stop', () => { stopHealthCheck(); return { ok: true } })
 // ── Session validity check (detect kicked-out sessions) ──
 
 let sessionCheckInterval: ReturnType<typeof setInterval> | null = null
+let sessionCheckInFlight = false
+
+function expireSession(reason: string): void {
+  console.log(`[session] ${reason} — forcing logout`)
+  sessionCookies = []
+  sessionToken = null
+  sessionUser = undefined
+  clearSession()
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('session:expired')
+    }
+  }
+  stopSessionCheck()
+}
+
+async function runSessionCheck(): Promise<void> {
+  if (sessionCheckInFlight) return
+  if (sessionCookies.length === 0 && !sessionToken) return
+
+  sessionCheckInFlight = true
+  try {
+    const res = await withTimeout(authFetch('GET', '/api/auth/get-session'), 8_000, 'session check')
+    if (res.status === 401 || res.status === 403) {
+      expireSession(`Session invalidated (status: ${res.status})`)
+    }
+  } catch {
+    // Network error / timeout — keep the local session and try again later.
+  } finally {
+    sessionCheckInFlight = false
+  }
+}
 
 function startSessionCheck(): void {
   if (sessionCheckInterval) return
-  sessionCheckInterval = setInterval(async () => {
-    // Only check if we have an active session
-    if (sessionCookies.length === 0) return
-    try {
-      const res = await authFetch('GET', '/api/auth/get-session')
-      if (res.status === 401 || res.status === 403) {
-        console.log('[session] Session invalidated (status:', res.status, ') — forcing logout')
-        // Clear local session
-        sessionCookies = []
-        sessionUser = undefined
-        clearSession()
-        // Notify renderer
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed()) {
-            win.webContents.send('session:expired')
-          }
-        }
-        stopSessionCheck()
-      }
-    } catch {
-      // Network error — don't logout, just skip
-    }
-  }, 30_000) // Check every 30 seconds
+  void runSessionCheck()
+  sessionCheckInterval = setInterval(() => {
+    void runSessionCheck()
+  }, 10_000)
 }
 
 function stopSessionCheck(): void {
@@ -461,26 +599,48 @@ function stopSessionCheck(): void {
     clearInterval(sessionCheckInterval)
     sessionCheckInterval = null
   }
+  sessionCheckInFlight = false
 }
 
 ipcMain.handle('session:start-check', () => { startSessionCheck(); return { ok: true } })
 ipcMain.handle('session:stop-check', () => { stopSessionCheck(); return { ok: true } })
 
 // Detect system HTTP proxy
+function parseWindowsProxyServer(value: string): { host: string; port: string } | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const segments = trimmed.split(';').map((item) => item.trim()).filter(Boolean)
+
+  for (const prefix of ['https=', 'http=', 'socks=']) {
+    const match = segments.find((item) => item.toLowerCase().startsWith(prefix))
+    if (match) {
+      const proxy = match.slice(prefix.length)
+      const [host, port] = proxy.includes(':') ? proxy.split(':') : [proxy, '80']
+      return host ? { host, port } : null
+    }
+  }
+
+  const [host, port] = trimmed.includes(':') ? trimmed.split(':') : [trimmed, '80']
+  return host ? { host, port } : null
+}
+
 ipcMain.handle('detect-system-proxy', async () => {
   const { execSync } = await import('child_process')
   const ourPort = String(getLocalPort())
   try {
     if (process.platform === 'darwin') {
       const out = execSync('scutil --proxy', { encoding: 'utf-8' })
-      const httpEnabled = /HTTPEnable\s*:\s*1/.test(out)
-      if (!httpEnabled) return { found: false }
-      const hostMatch = out.match(/HTTPProxy\s*:\s*(.+)/)
-      const portMatch = out.match(/HTTPPort\s*:\s*(\d+)/)
-      if (hostMatch && portMatch) {
-        // Ignore our own proxy — don't feed it back as upstream (causes loop)
-        if (portMatch[1].trim() === ourPort) return { found: false }
-        return { found: true, host: hostMatch[1].trim(), port: portMatch[1].trim() }
+      const candidates = [
+        { enabled: /HTTPEnable\s*:\s*1/.test(out), host: out.match(/HTTPProxy\s*:\s*(.+)/), port: out.match(/HTTPPort\s*:\s*(\d+)/) },
+        { enabled: /HTTPSEnable\s*:\s*1/.test(out), host: out.match(/HTTPSProxy\s*:\s*(.+)/), port: out.match(/HTTPSPort\s*:\s*(\d+)/) },
+        { enabled: /SOCKSEnable\s*:\s*1/.test(out), host: out.match(/SOCKSProxy\s*:\s*(.+)/), port: out.match(/SOCKSPort\s*:\s*(\d+)/) },
+      ]
+      for (const candidate of candidates) {
+        if (!candidate.enabled || !candidate.host || !candidate.port) continue
+        const host = candidate.host[1].trim()
+        const port = candidate.port[1].trim()
+        if (port === ourPort && host === '127.0.0.1') return { found: false }
+        return { found: true, host, port }
       }
     } else if (process.platform === 'win32') {
       const enableOut = execSync(
@@ -495,9 +655,17 @@ ipcMain.handle('detect-system-proxy', async () => {
       )
       const match = out.match(/ProxyServer\s+REG_SZ\s+(.+)/)
       if (match) {
-        const val = match[1].trim()
-        const [host, port] = val.includes(':') ? val.split(':') : [val, '80']
-        if (port === ourPort) return { found: false }
+        const parsed = parseWindowsProxyServer(match[1])
+        if (!parsed) return { found: false }
+        if (parsed.port === ourPort && parsed.host === '127.0.0.1') return { found: false }
+        return { found: true, host: parsed.host, port: parsed.port }
+      }
+    } else if (process.platform === 'linux') {
+      const mode = execSync('gsettings get org.gnome.system.proxy mode', { encoding: 'utf-8' }).trim().replace(/'/g, '')
+      if (mode !== 'manual') return { found: false }
+      const host = execSync('gsettings get org.gnome.system.proxy.http host', { encoding: 'utf-8' }).trim().replace(/'/g, '')
+      const port = execSync('gsettings get org.gnome.system.proxy.http port', { encoding: 'utf-8' }).trim()
+      if (host && !(host === '127.0.0.1' && port === ourPort)) {
         return { found: true, host, port }
       }
     }
@@ -829,7 +997,7 @@ function stopProxyMonitor(): void {
   }
 }
 
-ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
+ipcMain.handle('sidecar:start', async () => {
   // Clear session proxy so authFetch goes direct (in-memory, no OS network change).
   // Don't clear system proxy here — it triggers ERR_NETWORK_CHANGED.
   // System proxy will be overwritten by setSystemProxy() after Xray starts.
@@ -851,8 +1019,8 @@ ipcMain.handle('sidecar:start', async (_e, preProxy?: string) => {
   proxyCredentials = creds
   console.log('[proxy-auth] got credentials, expires:', creds.expireAt, 'password:', creds.password)
 
-  currentPreProxy = (preProxy && preProxy !== 'direct') ? preProxy : null
-  const result = await startSidecar(creds.password, preProxy)
+  currentPreProxy = null
+  const result = await startSidecar(creds.password)
   if (result.ok) {
     const port = getLocalPort()
     for (const win of BrowserWindow.getAllWindows()) {
@@ -890,14 +1058,6 @@ ipcMain.handle('sidecar:status', () => {
 
 ipcMain.handle('sidecar:proxy-status', () => {
   return { running: isSidecarRunning(), port: getLocalPort(), preProxy: currentPreProxy }
-})
-
-ipcMain.handle('sidecar:scan-ports', async () => {
-  return scanLocalPorts()
-})
-
-ipcMain.handle('sidecar:probe-pre-proxy', async (_e, host: string, port: number) => {
-  return probePreProxy(host, port)
 })
 
 ipcMain.handle('sidecar:verify', async () => {
