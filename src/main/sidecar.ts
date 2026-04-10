@@ -409,10 +409,14 @@ export function startHelper(): void {
     return
   }
 
+  // Detect system language for helper dialog i18n
+  const sysLang = app.getLocale().startsWith('zh') ? 'zh' : 'en'
+
   const args = [
     '--pid', String(process.pid),
     '--port', String(LOCAL_PORT),
     '--xray-pid', String(xrayPid),
+    '--lang', sysLang,
   ]
 
   console.log('[helper] starting:', binary, args.join(' '))
@@ -502,6 +506,8 @@ export async function setSystemProxy(): Promise<void> {
 
 export async function clearSystemProxy(): Promise<void> {
   console.log('[proxy] clearing system proxy')
+  // Clear shell profiles FIRST (sync, instant) — before-quit may not await the rest
+  clearShellProxy()
   if (process.platform === 'darwin') {
     const services = await getMacNetworkServices()
     for (const svc of services) {
@@ -522,7 +528,6 @@ export async function clearSystemProxy(): Promise<void> {
   } else if (process.platform === 'linux') {
     await run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'none']).catch(() => {})
   }
-  clearShellProxy()
 }
 
 export function checkSystemProxy(): Promise<boolean> {

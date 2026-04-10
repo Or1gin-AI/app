@@ -23,11 +23,10 @@ func clearSystemProxy(port int) {
 }
 
 func showDialog() {
-	// Try zenity first (GNOME), fallback to kdialog (KDE), then xmessage
-	msg := "OriginAI 已异常退出，系统代理已自动恢复。\n请立即停止使用 Claude 相关产品，并重新启动 OriginAI。"
-	if err := exec.Command("zenity", "--warning", "--title=OriginAI", "--text="+msg).Run(); err != nil {
-		if err := exec.Command("kdialog", "--sorry", msg, "--title", "OriginAI").Run(); err != nil {
-			exec.Command("xmessage", "-center", msg).Run()
+	_, body := dialogMsg()
+	if err := exec.Command("zenity", "--warning", "--title=OriginAI", "--text="+body).Run(); err != nil {
+		if err := exec.Command("kdialog", "--sorry", body, "--title", "OriginAI").Run(); err != nil {
+			exec.Command("xmessage", "-center", body).Run()
 		}
 	}
 }

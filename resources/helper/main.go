@@ -7,18 +7,21 @@ import (
 	"time"
 )
 
+var lang string
+
 func main() {
 	pid := flag.Int("pid", 0, "Main process PID to monitor")
 	port := flag.Int("port", 21911, "Proxy port to clean up")
 	xrayPid := flag.Int("xray-pid", 0, "Xray process PID to kill")
+	flag.StringVar(&lang, "lang", "zh", "Dialog language (zh or en)")
 	flag.Parse()
 
 	if *pid == 0 {
-		fmt.Fprintln(os.Stderr, "usage: originai-helper --pid <PID> --port <PORT> --xray-pid <XRAY_PID>")
+		fmt.Fprintln(os.Stderr, "usage: originai-helper --pid <PID> --port <PORT> --xray-pid <XRAY_PID> [--lang zh|en]")
 		os.Exit(1)
 	}
 
-	fmt.Printf("[helper] watching pid=%d port=%d xray-pid=%d\n", *pid, *port, *xrayPid)
+	fmt.Printf("[helper] watching pid=%d port=%d xray-pid=%d lang=%s\n", *pid, *port, *xrayPid, lang)
 
 	for {
 		time.Sleep(1 * time.Second)
@@ -46,4 +49,13 @@ func main() {
 			os.Exit(0)
 		}
 	}
+}
+
+func dialogMsg() (title string, body string) {
+	if lang == "en" {
+		return "OriginAI",
+			"OriginAI has crashed unexpectedly. System proxy has been automatically restored.\n\nPlease stop using all Claude products immediately and restart OriginAI."
+	}
+	return "OriginAI",
+		"OriginAI 已异常退出，系统代理已自动恢复。\n\n请立即停止使用 Claude 相关产品，并重新启动 OriginAI。"
 }

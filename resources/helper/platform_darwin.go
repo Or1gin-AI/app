@@ -47,7 +47,10 @@ func clearSystemProxy(port int) {
 }
 
 func showDialog() {
-	msg := "OriginAI 已异常退出，系统代理已自动恢复。\\n请立即停止使用 Claude 相关产品，并重新启动 OriginAI。"
-	script := fmt.Sprintf(`display dialog "%s" with title "OriginAI" buttons {"OK"} default button "OK" with icon caution`, msg)
+	title, body := dialogMsg()
+	// Escape double quotes and use \n for osascript
+	escaped := strings.ReplaceAll(body, "\n", "\\n")
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	script := fmt.Sprintf(`display dialog "%s" with title "%s" buttons {"OK"} default button "OK" with icon caution`, escaped, title)
 	exec.Command("osascript", "-e", script).Run()
 }

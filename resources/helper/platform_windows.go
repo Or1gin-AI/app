@@ -48,12 +48,13 @@ const (
 )
 
 func showDialog() {
-	title, _ := syscall.UTF16PtrFromString("OriginAI")
-	msg, _ := syscall.UTF16PtrFromString("OriginAI 已异常退出，系统代理已自动恢复。\n请立即停止使用 Claude 相关产品，并重新启动 OriginAI。")
+	t, body := dialogMsg()
+	titlePtr, _ := syscall.UTF16PtrFromString(t)
+	msgPtr, _ := syscall.UTF16PtrFromString(body)
 	procMessageBox.Call(
 		0,
-		uintptr(unsafe.Pointer(msg)),
-		uintptr(unsafe.Pointer(title)),
+		uintptr(unsafe.Pointer(msgPtr)),
+		uintptr(unsafe.Pointer(titlePtr)),
 		uintptr(mbOK|mbIconWarning),
 	)
 }
