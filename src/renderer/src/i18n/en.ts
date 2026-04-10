@@ -96,6 +96,15 @@ export const en = {
     proxyManualDesc: 'Manually enter your local proxy address and port',
     proxyDirect: 'Direct',
     proxyDirectDesc: 'For overseas users or those with TUN mode enabled',
+    // Auto-detect scan
+    scanTitle: 'Select Upstream Proxy',
+    scanSubtitle: 'Scanned local proxy ports. Choose an available connection.',
+    scanning: 'Scanning local proxy ports...',
+    scanDirect: 'Direct (no upstream proxy)',
+    scanNone: 'No proxy or direct connection detected. Make sure your proxy client is running.',
+    scanNotReachable: 'Unreachable',
+    scanSystemProxyWarning: 'System proxy is currently enabled. Please disable "System Proxy" in your proxy client, keep it running in the background, then retry.',
+    scanRetry: 'Retry Scan',
     back: '\u2190 Back',
     // Manual proxy input
     manualTitle: 'Manual Proxy Setup',

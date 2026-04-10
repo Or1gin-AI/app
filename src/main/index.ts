@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper, scanLocalPorts } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -800,6 +800,10 @@ ipcMain.handle('sidecar:status', () => {
 
 ipcMain.handle('sidecar:proxy-status', () => {
   return { running: isSidecarRunning(), port: getLocalPort(), preProxy: currentPreProxy }
+})
+
+ipcMain.handle('sidecar:scan-ports', async () => {
+  return scanLocalPorts()
 })
 
 ipcMain.handle('sidecar:probe-pre-proxy', async (_e, host: string, port: number) => {

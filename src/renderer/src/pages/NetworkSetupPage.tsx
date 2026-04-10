@@ -22,7 +22,21 @@ interface IpInfo {
   isChina: boolean
 }
 
-type View = 'detecting' | 'result' | 'proxy-mode' | 'proxy-manual' | 'optimizing'
+type View = 'detecting' | 'result' | 'proxy-mode' | 'proxy-scan' | 'proxy-manual' | 'optimizing'
+
+interface PortScanResult {
+  port: number
+  label: string
+  ok: boolean
+  latency?: number
+}
+
+interface ScanState {
+  scanning: boolean
+  proxies: PortScanResult[]
+  direct: { ok: boolean; latency?: number }
+  systemProxyBlocking: boolean
+}
 
 function getPurity(info: IpInfo): 'clean' | 'proxy' | 'datacenter' {
   if (info.isProxy) return 'proxy'
@@ -44,6 +58,11 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   const [preProxyPort, setPreProxyPort] = useState('7890')
   const [_lastProxyAddr, setLastProxyAddr] = useState('')
   const [probeLatency, setProbeLatency] = useState<number | null>(null)
+
+  // Auto-detect scan state
+  const [scan, setScan] = useState<ScanState>({
+    scanning: false, proxies: [], direct: { ok: false }, systemProxyBlocking: false,
+  })
 
   // Detect IP on mount
   useEffect(() => {
@@ -130,25 +149,25 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
 
   // --- Handlers for proxy modes ---
 
-  const handleAutoProxy = useCallback(async () => {
-    const sys = await window.electronAPI.detectSystemProxy()
-    if (sys.found && sys.host && sys.port) {
-      startOptimize(`${sys.host}:${sys.port}`)
-    } else {
-      // No system proxy found — if overseas, use direct; otherwise go manual
-      if (ipInfo && !ipInfo.isChina) {
-        startOptimize('direct')
-      } else {
-        setPreProxyHost('127.0.0.1')
-        setPreProxyPort('7890')
-        setView('proxy-manual')
-      }
-    }
-  }, [ipInfo, startOptimize])
+  const runScan = useCallback(async () => {
+    setScan({ scanning: true, proxies: [], direct: { ok: false }, systemProxyBlocking: false })
+    setView('proxy-scan')
 
-  const handleDirect = useCallback(() => {
-    startOptimize('direct')
-  }, [startOptimize])
+    // Check if system proxy is active (would conflict)
+    const sys = await window.electronAPI.detectSystemProxy()
+    if (sys.found) {
+      setScan({ scanning: false, proxies: [], direct: { ok: false }, systemProxyBlocking: true })
+      return
+    }
+
+    // Scan local ports + VPS
+    const result = await window.electronAPI.sidecar.scanPorts()
+    setScan({ scanning: false, proxies: result.proxies, direct: result.direct, systemProxyBlocking: false })
+  }, [])
+
+  const handleAutoProxy = useCallback(() => {
+    runScan()
+  }, [runScan])
 
   const handleManualSubmit = useCallback(() => {
     startOptimize(`${preProxyHost}:${preProxyPort}`)
@@ -290,13 +309,6 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
         icon: <VscSettingsGear size={16} className="text-brand" />,
         onClick: () => setView('proxy-manual'),
       },
-      {
-        key: 'direct',
-        label: t.network.proxyDirect,
-        desc: t.network.proxyDirectDesc,
-        icon: <PiWifiHighBold size={16} className="text-brand" />,
-        onClick: handleDirect,
-      },
     ]
 
     return (
@@ -335,6 +347,144 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
         >
           {t.network.back}
         </button>
+      </div>
+    )
+  }
+
+  // --- Auto-detect scan results ---
+  if (view === 'proxy-scan') {
+    const availableProxies = scan.proxies.filter((p) => p.ok)
+    const hasAny = availableProxies.length > 0 || scan.direct.ok
+
+    // Scanning spinner
+    if (scan.scanning) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
+          <div className="w-14 h-14 rounded-full bg-brand/10 flex items-center justify-center mb-5">
+            <VscLoading size={24} className="text-brand animate-spin" />
+          </div>
+          <h2 className="font-serif text-xl text-text mb-1.5">{t.network.scanTitle}</h2>
+          <p className="text-[13px] text-text-muted">{t.network.scanning}</p>
+        </div>
+      )
+    }
+
+    // System proxy blocking
+    if (scan.systemProxyBlocking) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
+          <div className="w-14 h-14 rounded-full bg-yellow-500/10 flex items-center justify-center mb-5">
+            <PiWarningBold size={24} className="text-yellow-500" />
+          </div>
+          <h2 className="font-serif text-xl text-text mb-1.5">{t.network.scanTitle}</h2>
+          <p className="text-[13px] text-text-muted mb-6 text-center max-w-[380px] leading-relaxed">
+            {t.network.scanSystemProxyWarning}
+          </p>
+          <button
+            onClick={runScan}
+            className="px-8 py-2.5 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity"
+          >
+            {t.network.scanRetry}
+          </button>
+          <button
+            onClick={() => setView('proxy-mode')}
+            className="mt-3 text-[12px] text-text-faint hover:text-text-muted transition-colors cursor-pointer"
+          >
+            {t.network.back}
+          </button>
+        </div>
+      )
+    }
+
+    // Scan results
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
+        <div className="w-14 h-14 rounded-full bg-brand/10 flex items-center justify-center mb-5">
+          <VscSettingsGear size={24} className="text-brand" />
+        </div>
+        <h2 className="font-serif text-xl text-text mb-1.5">{t.network.scanTitle}</h2>
+        <p className="text-[13px] text-text-muted mb-6 text-center">{t.network.scanSubtitle}</p>
+
+        <div className="w-full max-w-[380px] flex flex-col gap-1.5 mb-4">
+          {scan.proxies.map((p) => (
+            <button
+              key={p.port}
+              onClick={() => p.ok && startOptimize(`127.0.0.1:${p.port}`)}
+              disabled={!p.ok}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${
+                p.ok
+                  ? 'bg-bg-card border-border hover:border-brand/40 cursor-pointer'
+                  : 'bg-bg-alt/50 border-border/50 cursor-not-allowed opacity-50'
+              }`}
+            >
+              <div className={`w-2 h-2 rounded-full shrink-0 ${
+                p.ok
+                  ? (p.latency! < 100 ? 'bg-green-500' : p.latency! < 300 ? 'bg-yellow-500' : 'bg-red-500')
+                  : 'bg-gray-300'
+              }`} />
+              <div className="flex-1 min-w-0">
+                <span className="text-[13px] text-text font-mono">127.0.0.1:{p.port}</span>
+                <span className="text-[11px] text-text-faint ml-2">{p.label}</span>
+              </div>
+              <span className={`text-[12px] font-mono shrink-0 ${
+                p.ok
+                  ? (p.latency! < 100 ? 'text-green-600' : p.latency! < 300 ? 'text-yellow-500' : 'text-red-500')
+                  : 'text-text-faint'
+              }`}>
+                {p.ok ? `${p.latency}ms` : t.network.scanNotReachable}
+              </span>
+            </button>
+          ))}
+
+          {/* Divider */}
+          <div className="border-t border-border my-1" />
+
+          {/* Direct option */}
+          <button
+            onClick={() => scan.direct.ok && startOptimize('direct')}
+            disabled={!scan.direct.ok}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${
+              scan.direct.ok
+                ? 'bg-bg-card border-border hover:border-brand/40 cursor-pointer'
+                : 'bg-bg-alt/50 border-border/50 cursor-not-allowed opacity-50'
+            }`}
+          >
+            <div className={`w-2 h-2 rounded-full shrink-0 ${
+              scan.direct.ok
+                ? (scan.direct.latency! < 100 ? 'bg-green-500' : scan.direct.latency! < 300 ? 'bg-yellow-500' : 'bg-red-500')
+                : 'bg-gray-300'
+            }`} />
+            <div className="flex-1 min-w-0">
+              <span className="text-[13px] text-text">{t.network.scanDirect}</span>
+            </div>
+            <span className={`text-[12px] font-mono shrink-0 ${
+              scan.direct.ok
+                ? (scan.direct.latency! < 100 ? 'text-green-600' : scan.direct.latency! < 300 ? 'text-yellow-500' : 'text-red-500')
+                : 'text-text-faint'
+            }`}>
+              {scan.direct.ok ? `${scan.direct.latency}ms` : t.network.scanNotReachable}
+            </span>
+          </button>
+        </div>
+
+        {!hasAny && (
+          <p className="text-xs text-amber-600 mb-4 text-center max-w-[380px]">{t.network.scanNone}</p>
+        )}
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={runScan}
+            className="px-6 py-2.5 bg-bg-card border border-border text-text-secondary rounded-lg text-sm cursor-pointer hover:border-brand/40 transition-colors"
+          >
+            {t.network.scanRetry}
+          </button>
+          <button
+            onClick={() => setView('proxy-mode')}
+            className="text-[12px] text-text-faint hover:text-text-muted transition-colors cursor-pointer"
+          >
+            {t.network.back}
+          </button>
+        </div>
       </div>
     )
   }

@@ -96,6 +96,15 @@ export const zh = {
     proxyManualDesc: '手动输入本地代理地址和端口',
     proxyDirect: '直连',
     proxyDirectDesc: '适用于您当前在海外或者开启了 TUN 模式的情况',
+    // Auto-detect scan
+    scanTitle: '选择前置代理',
+    scanSubtitle: '已扫描本地常见代理端口，选择一个可用的连接方式',
+    scanning: '正在扫描本地代理端口...',
+    scanDirect: '直连（不使用前置代理）',
+    scanNone: '未检测到可用的代理或直连通道，请确认代理客户端正在运行',
+    scanNotReachable: '不通',
+    scanSystemProxyWarning: '检测到您的系统代理已开启，请先在代理客户端中关闭「系统代理」开关，保持后台运行后重试。',
+    scanRetry: '重新检测',
     back: '\u2190 返回',
     // Manual proxy input
     manualTitle: '手动配置代理',
