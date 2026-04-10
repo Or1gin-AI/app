@@ -72,7 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stop: () => ipcRenderer.invoke('sidecar:stop'),
     status: () => ipcRenderer.invoke('sidecar:status'),
     verify: () => ipcRenderer.invoke('sidecar:verify'),
-    pacStatus: () => ipcRenderer.invoke('sidecar:pac-status')
+    proxyStatus: () => ipcRenderer.invoke('sidecar:proxy-status'),
+    probePreProxy: (host: string, port: number) => ipcRenderer.invoke('sidecar:probe-pre-proxy', host, port)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
@@ -101,6 +102,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('network-health', handler)
       return () => ipcRenderer.removeListener('network-health', handler)
     }
+  },
+  proxy: {
+    onConflict: (cb: (data: { hijacked: boolean }) => void) => {
+      const handler = (_: unknown, data: { hijacked: boolean }) => cb(data)
+      ipcRenderer.on('proxy:conflict', handler)
+      return () => ipcRenderer.removeListener('proxy:conflict', handler)
+    },
   },
   updater: {
     install: () => ipcRenderer.invoke('updater:install'),

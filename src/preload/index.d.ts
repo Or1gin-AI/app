@@ -89,7 +89,8 @@ declare global {
         stop: () => Promise<{ ok: boolean }>
         status: () => Promise<{ running: boolean }>
         verify: () => Promise<{ ok: boolean; ip?: string; error?: string }>
-        pacStatus: () => Promise<{ running: boolean }>
+        proxyStatus: () => Promise<{ running: boolean; port: number }>
+        probePreProxy: (host: string, port: number) => Promise<{ ok: boolean; latency?: number; error?: string }>
       }
       session: {
         startCheck: () => Promise<{ ok: boolean }>
@@ -100,6 +101,9 @@ declare global {
         start: () => Promise<{ ok: boolean }>
         stop: () => Promise<{ ok: boolean }>
         onStatus: (cb: (data: { ok: boolean; ip: string | null }) => void) => () => void
+      }
+      proxy: {
+        onConflict: (cb: (data: { hijacked: boolean }) => void) => () => void
       }
       updater: {
         install: () => Promise<void>
