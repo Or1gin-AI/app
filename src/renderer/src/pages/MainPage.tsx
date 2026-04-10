@@ -5,11 +5,11 @@ interface MainPageProps {
   userName: string
 }
 
-// idle       → show "接收邮件"
+// idle       → show "获取登录链接"
 // checking   → loading spinner, fetching emails
 // no-email   → no valid email, 60s cooldown then back to idle
-// has-email  → email found (<5min), show "请求登录" + age + refresh
-// requesting → extracting magic link
+// has-email  → email found (<5min), extract link, show URL + copy + open
+// requesting → opening link
 // success    → link opened
 type EmailPhase = 'idle' | 'checking' | 'no-email' | 'has-email' | 'requesting' | 'success'
 
@@ -29,12 +29,26 @@ function getEmailAge(
   return { label: t.emailAgo.replace('{n}', String(Math.floor(diffMin))), color: 'text-yellow-500' }
 }
 
+/** Extract magic link from email body */
+function extractMagicLink(body: string): string | null {
+  const urls = body.match(/https?:\/\/[^\s<>"')\]]+/g) || []
+  return urls.find((u) => u.includes('magic-link')) || urls[0] || null
+}
+
+/** Truncate URL for display */
+function truncateUrl(url: string, maxLen = 40): string {
+  if (url.length <= maxLen) return url
+  return url.slice(0, maxLen) + '...'
+}
+
 export function MainPage({ userName }: MainPageProps) {
   const { t } = useLocale()
   const [phase, setPhase] = useState<EmailPhase>('idle')
   const [cooldown, setCooldown] = useState(0)
   const [latestEmail, setLatestEmail] = useState<EmailItem | null>(null)
+  const [magicLink, setMagicLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
   const [, setTick] = useState(0)
   const busyRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -66,24 +80,22 @@ export function MainPage({ userName }: MainPageProps) {
     return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null } }
   }, [cooldown > 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When cooldown expires → no-email goes back to idle; has-email auto re-fetches
+  // When cooldown expires → no-email goes back to idle
   useEffect(() => {
     if (cooldown > 0) return
     if (phase === 'no-email') {
       setPhase('idle')
-    } else if (phase === 'has-email') {
-      fetchEmails()
     }
-  }, [cooldown, phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cooldown, phase])
 
   // Tick every 15s to update relative time when has-email
   useEffect(() => {
     if (!(phase === 'has-email' && latestEmail)) return
     ageTickRef.current = setInterval(() => {
-      // If email is now older than 5 min, expire it
       const diffMin = (Date.now() - new Date(latestEmail.date).getTime()) / 60_000
       if (diffMin >= 5) {
         setLatestEmail(null)
+        setMagicLink(null)
         setPhase('idle')
       }
       setTick((n) => n + 1)
@@ -116,8 +128,17 @@ export function MainPage({ userName }: MainPageProps) {
         return
       }
 
-      const emails = res.data as EmailItem[]
-      if (!emails || emails.length === 0) {
+      // Handle both array and { emails: [...] } wrapper formats
+      let emails: EmailItem[]
+      if (Array.isArray(res.data)) {
+        emails = res.data as EmailItem[]
+      } else if (res.data && typeof res.data === 'object' && 'emails' in (res.data as Record<string, unknown>)) {
+        emails = (res.data as { emails: EmailItem[] }).emails || []
+      } else {
+        emails = []
+      }
+
+      if (emails.length === 0) {
         setPhase('no-email')
         setCooldown(60)
         return
@@ -127,13 +148,14 @@ export function MainPage({ userName }: MainPageProps) {
       const diffMin = (Date.now() - new Date(latest.date).getTime()) / 60_000
 
       if (diffMin >= 5) {
-        // Too old, treat as no email
         setPhase('no-email')
         setCooldown(60)
         return
       }
 
+      const link = extractMagicLink(latest.body)
       setLatestEmail(latest)
+      setMagicLink(link)
       setPhase('has-email')
     } catch {
       setPhase('no-email')
@@ -143,27 +165,24 @@ export function MainPage({ userName }: MainPageProps) {
     }
   }, [])
 
-  /** Refresh: stay in has-email but start cooldown, then auto re-fetch */
-  const handleRefresh = useCallback(() => {
-    setCooldown(60)
-  }, [])
-
-  /** Request login: extract magic link from the stored email */
-  const handleRequestLogin = useCallback(async () => {
-    if (!latestEmail) return
-    setPhase('requesting')
-
-    const urls = latestEmail.body.match(/https?:\/\/[^\s<>"')\]]+/g) || []
-    const magicLink = urls.find((u) => u.includes('magic-link')) || urls[0]
-
-    if (!magicLink) {
-      setPhase('has-email')
-      return
-    }
-
+  const handleOpenLink = useCallback(() => {
+    if (!magicLink) return
     window.open(magicLink, '_blank')
     setPhase('success')
-  }, [latestEmail])
+  }, [magicLink])
+
+  const handleCopyLink = useCallback(() => {
+    if (!magicLink) return
+    navigator.clipboard.writeText(magicLink)
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 1500)
+  }, [magicLink])
+
+  const handleRefetch = useCallback(() => {
+    setLatestEmail(null)
+    setMagicLink(null)
+    fetchEmails()
+  }, [fetchEmails])
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -256,40 +275,63 @@ export function MainPage({ userName }: MainPageProps) {
 
       case 'has-email': {
         const age = latestEmail ? getEmailAge(latestEmail.date, t.main.claudeWeb) : null
-        const refreshing = cooldown > 0
         return (
           <>
+            {/* Link display with copy */}
+            {magicLink ? (
+              <div className="w-full mb-3">
+                <div className="flex items-center gap-1.5 bg-bg-alt rounded-lg px-3 py-2 border border-border">
+                  <span className="flex-1 text-xs text-text-secondary font-mono truncate" title={magicLink}>
+                    {truncateUrl(magicLink)}
+                  </span>
+                  <button
+                    onClick={handleCopyLink}
+                    className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-text-muted hover:text-brand hover:bg-bg-card transition-colors cursor-pointer"
+                  >
+                    {linkCopied ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        <span className="text-green-600">{t.main.claudeWeb.copiedLink}</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        <span>{t.main.claudeWeb.copyLink}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-amber-600 mb-3">{t.main.claudeWeb.noLink}</p>
+            )}
+
+            {/* Primary: Open Link / Secondary: Re-fetch */}
             <div className="flex items-center justify-center gap-2">
               <button
-                onClick={handleRequestLogin}
-                className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={handleOpenLink}
+                disabled={!magicLink}
+                className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {t.main.claudeWeb.requestLogin}
               </button>
-              {/* Refresh button */}
               <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className={`w-9 h-9 rounded-lg border border-border-strong flex items-center justify-center transition-colors ${
-                  refreshing ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-alt'
-                }`}
-                title="Refresh"
+                onClick={handleRefetch}
+                className="px-4 py-2.5 rounded-lg text-sm border border-border text-text-secondary cursor-pointer hover:border-brand/40 transition-colors"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">
-                  <polyline points="23 4 23 10 17 10" />
-                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                </svg>
+                {t.main.claudeWeb.refetch}
               </button>
             </div>
+
             {age && (
               <p className={`text-xs mt-2 ${age.color}`}>
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-current opacity-70 mr-1 align-middle" />
                 {t.main.claudeWeb.emailReceived} · {age.label}
-              </p>
-            )}
-            {refreshing && (
-              <p className="text-xs text-text-faint mt-1">
-                {t.main.claudeWeb.refreshWait.replace('{time}', formatTime(cooldown))}
               </p>
             )}
           </>
@@ -313,7 +355,7 @@ export function MainPage({ userName }: MainPageProps) {
         return (
           <>
             <button
-              onClick={() => { setPhase('idle'); setLatestEmail(null) }}
+              onClick={() => { setPhase('idle'); setLatestEmail(null); setMagicLink(null) }}
               className="px-7 py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
             >
               {t.main.claudeWeb.fetchEmail}
