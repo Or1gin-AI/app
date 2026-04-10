@@ -3,11 +3,10 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { spawn, ChildProcess, execFile } from 'child_process'
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
-import http from 'node:http'
 
-const LOCAL_HTTP_PORT = 8080
-const LOCAL_SOCKS_PORT = 1080
-const LOCAL_PORT = LOCAL_HTTP_PORT // used externally for PAC / proxy config
+const LOCAL_HTTP_PORT = 21911
+const LOCAL_SOCKS_PORT = 21910
+const LOCAL_PORT = LOCAL_HTTP_PORT
 const DEFAULT_PRE_PROXY = '127.0.0.1:7890'
 
 // Callback for when sidecar crashes after successful start
@@ -76,24 +75,93 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     proxyOutbound.proxySettings = { tag: 'pre-proxy' }
   }
 
-  // direct MUST be first: Xray routes unmatched traffic to the first outbound.
-  // Whitelisted domains are explicitly routed to 'proxy' by routing rules.
-  const outbounds: Record<string, unknown>[] = [
-    { tag: 'direct', protocol: 'freedom' },
-    proxyOutbound,
-  ]
+  // The first outbound is the default for unmatched traffic.
+  // With pre-proxy: upstream (forwards non-Claude traffic to Clash)
+  // Without pre-proxy: direct (freedom)
+  const outbounds: Record<string, unknown>[] = []
+
   if (usePreProxy) {
-    outbounds.push({
-      tag: 'pre-proxy',
-      protocol: 'http',
-      settings: {
-        servers: [{ address: preProxyHost, port: preProxyPort }],
+    outbounds.push(
+      {
+        tag: 'upstream',
+        protocol: 'http',
+        settings: {
+          servers: [{ address: preProxyHost, port: preProxyPort }],
+        },
       },
+      proxyOutbound,
+      {
+        tag: 'pre-proxy',
+        protocol: 'http',
+        settings: {
+          servers: [{ address: preProxyHost, port: preProxyPort }],
+        },
+      },
+      { tag: 'direct', protocol: 'freedom' },
+      { tag: 'block', protocol: 'blackhole' },
+    )
+  } else {
+    outbounds.push(
+      { tag: 'direct', protocol: 'freedom' },
+      proxyOutbound,
+      { tag: 'block', protocol: 'blackhole' },
+    )
+  }
+
+  const routingRules: Record<string, unknown>[] = [
+    {
+      type: 'field',
+      outboundTag: 'proxy',
+      domain: [
+        // Core services
+        'domain:anthropic.com',
+        'domain:anthropic.co',
+        'domain:claude.ai',
+        'domain:claude.com',
+        'domain:claudeusercontent.com',
+        'domain:storage.googleapis.com',
+        // Telemetry / analytics
+        'domain:datadoghq.com',
+        'domain:datadog.com',
+        'domain:ddog-gov.com',
+        'domain:datadoghq.eu',
+        'domain:browser-intake-us5-datadoghq.com',
+        'domain:browser-intake-datadoghq.com',
+        'domain:browser-intake-us3-datadoghq.com',
+        'domain:browser-intake-us1-datadoghq.com',
+        'domain:sentry.io',
+        'domain:statsigapi.net',
+        'domain:statsig.com',
+        'domain:segment.io',
+        'domain:growthbook.io',
+        'domain:split.io',
+        'domain:intellimize.co',
+        // Wildcard patterns
+        'regexp:.*anthropic.*',
+        'regexp:.*claude.*',
+        'regexp:.*datadog.*',
+        'regexp:.*ddog.*',
+        'regexp:.*sentry.*',
+        'regexp:.*statsig.*',
+        'regexp:.*intercom.*',
+        // Third-party integrations
+        'domain:intercom.io',
+        'domain:intercomcdn.com',
+        'domain:facebook.net',
+        // IP check: ipify is whitelisted (proxy tunnel), checkip.amazonaws is NOT (direct)
+        'domain:ipify.org',
+      ],
+    },
+  ]
+
+  // When upstream exists, route private/LAN IPs directly (skip Clash)
+  if (usePreProxy) {
+    routingRules.push({
+      type: 'field',
+      outboundTag: 'direct',
+      ip: ['geoip:private'],
     })
   }
-  outbounds.push(
-    { tag: 'block', protocol: 'blackhole' },
-  )
 
   return {
     log: { loglevel: 'info' },
@@ -115,82 +183,9 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     outbounds,
     routing: {
       domainStrategy: 'AsIs',
-      rules: [
-        {
-          type: 'field',
-          outboundTag: 'proxy',
-          domain: [
-            // Core services
-            'domain:anthropic.com',
-            'domain:anthropic.co',
-            'domain:claude.ai',
-            'domain:claude.com',
-            'domain:claudeusercontent.com',
-            'domain:storage.googleapis.com',
-            // Telemetry / analytics
-            'domain:datadoghq.com',
-            'domain:datadog.com',
-            'domain:ddog-gov.com',
-            'domain:datadoghq.eu',
-            'domain:browser-intake-us5-datadoghq.com',
-            'domain:browser-intake-datadoghq.com',
-            'domain:browser-intake-us3-datadoghq.com',
-            'domain:browser-intake-us1-datadoghq.com',
-            'domain:sentry.io',
-            'domain:statsigapi.net',
-            'domain:statsig.com',
-            'domain:segment.io',
-            'domain:growthbook.io',
-            'domain:split.io',
-            'domain:intellimize.co',
-            // Wildcard patterns
-            'regexp:.*anthropic.*',
-            'regexp:.*claude.*',
-            'regexp:.*datadog.*',
-            'regexp:.*ddog.*',
-            'regexp:.*sentry.*',
-            'regexp:.*statsig.*',
-            'regexp:.*intercom.*',
-            // Third-party integrations
-            'domain:intercom.io',
-            'domain:intercomcdn.com',
-            'domain:facebook.net',
-            // IP check: ipify is whitelisted (proxy tunnel), checkip.amazonaws is NOT (direct)
-            'domain:ipify.org',
-          ],
-        },
-      ],
-      // Everything else goes direct
+      rules: routingRules,
     },
   }
-}
-
-export function generatePacScript(): string {
-  return `function FindProxyForURL(url, host) {
-  var dominated = [
-    "anthropic.com", "anthropic.co", "claude.ai", "claude.com",
-    "claudeusercontent.com", "storage.googleapis.com",
-    "datadoghq.com", "datadog.com", "ddog-gov.com", "datadoghq.eu",
-    "browser-intake-us5-datadoghq.com", "browser-intake-datadoghq.com",
-    "browser-intake-us3-datadoghq.com", "browser-intake-us1-datadoghq.com",
-    "sentry.io", "statsigapi.net", "statsig.com", "segment.io",
-    "growthbook.io", "split.io", "intellimize.co",
-    "intercom.io", "intercomcdn.com", "facebook.net",
-    "ipify.org"
-  ];
-  for (var i = 0; i < dominated.length; i++) {
-    if (dnsDomainIs(host, dominated[i]) || host === dominated[i]) {
-      return "PROXY 127.0.0.1:${LOCAL_PORT}";
-    }
-  }
-  var wildcards = ["anthropic", "claude", "datadog", "ddog", "sentry", "statsig", "intercom"];
-  for (var j = 0; j < wildcards.length; j++) {
-    if (host.indexOf(wildcards[j]) !== -1) {
-      return "PROXY 127.0.0.1:${LOCAL_PORT}";
-    }
-  }
-  return "DIRECT";
-}`
 }
 
 /** Try connecting to a port to check if it's listening */
@@ -389,43 +384,6 @@ export function getLocalPort(): number {
 
 // ── System proxy management ──
 
-let pacServer: http.Server | null = null
-let pacServerPort = 0
-
-function ensurePacServer(): Promise<number> {
-  if (pacServer && pacServerPort) return Promise.resolve(pacServerPort)
-  return new Promise((resolve) => {
-    pacServer = http.createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/x-ns-proxy-autoconfig' })
-      res.end(generatePacScript())
-    })
-    pacServer.on('error', (err) => {
-      console.error('[proxy] PAC server error, restarting:', err.message)
-      pacServer = null
-      pacServerPort = 0
-      // Auto-restart after 1s
-      setTimeout(() => ensurePacServer().catch(() => {}), 1000)
-    })
-    pacServer.listen(0, '127.0.0.1', () => {
-      pacServerPort = (pacServer!.address() as import('net').AddressInfo).port
-      console.log(`[proxy] PAC server on http://127.0.0.1:${pacServerPort}`)
-      resolve(pacServerPort)
-    })
-  })
-}
-
-function stopPacServer(): void {
-  if (pacServer) { pacServer.close(); pacServer = null; pacServerPort = 0 }
-}
-
-export function isPacServerRunning(): boolean {
-  return pacServer !== null && pacServerPort > 0
-}
-
-function getPacFilePath(): string {
-  return join(getConfigDir(), 'proxy.pac')
-}
-
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, (err) => (err ? reject(err) : resolve()))
@@ -448,59 +406,108 @@ async function getMacNetworkServices(): Promise<string[]> {
 }
 
 export async function setSystemProxy(): Promise<void> {
-  // Also write file for reference
-  const pacPath = getPacFilePath()
-  writeFileSync(pacPath, generatePacScript())
-
-  // Serve PAC via HTTP — file:// PAC is unreliable in some browsers/VPN setups
-  const port = await ensurePacServer()
-  const pacUrl = `http://127.0.0.1:${port}/proxy.pac`
-  console.log('[proxy] PAC URL:', pacUrl)
+  const port = String(LOCAL_PORT)
+  console.log(`[proxy] setting system HTTP proxy to 127.0.0.1:${port}`)
 
   if (process.platform === 'darwin') {
     const services = await getMacNetworkServices()
-    console.log('[proxy] setting PAC on services:', services.join(', '))
+    console.log('[proxy] setting HTTP proxy on services:', services.join(', '))
     for (const svc of services) {
       try {
-        await run('networksetup', ['-setautoproxyurl', svc, pacUrl])
-        await run('networksetup', ['-setautoproxystate', svc, 'on'])
-        console.log(`[proxy] PAC enabled on: ${svc}`)
+        await run('networksetup', ['-setwebproxy', svc, '127.0.0.1', port])
+        await run('networksetup', ['-setwebproxystate', svc, 'on'])
+        await run('networksetup', ['-setsecurewebproxy', svc, '127.0.0.1', port])
+        await run('networksetup', ['-setsecurewebproxystate', svc, 'on'])
+        await run('networksetup', ['-setautoproxystate', svc, 'off'])
+        console.log(`[proxy] HTTP proxy enabled on: ${svc}`)
       } catch (err) {
-        console.warn(`[proxy] PAC failed on ${svc}:`, err)
+        console.warn(`[proxy] HTTP proxy failed on ${svc}:`, err)
       }
     }
   } else if (process.platform === 'win32') {
     await run('reg', [
       'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-      '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', pacUrl, '/f'
+      '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '1', '/f'
     ])
-  } else if (process.platform === 'linux') {
-    // GNOME-based desktops
-    const pacUrl = `file://${pacPath}`
-    await run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'auto']).catch(() => {})
-    await run('gsettings', ['set', 'org.gnome.system.proxy', 'autoconfig-url', pacUrl]).catch(() => {})
-  }
-}
-
-export async function clearSystemProxy(): Promise<void> {
-  console.log('[proxy] clearing system proxy')
-  stopPacServer()
-  if (process.platform === 'darwin') {
-    const services = await getMacNetworkServices()
-    for (const svc of services) {
-      try {
-        await run('networksetup', ['-setautoproxystate', svc, 'off'])
-      } catch { /* skip */ }
-    }
-  } else if (process.platform === 'win32') {
+    await run('reg', [
+      'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', `127.0.0.1:${port}`, '/f'
+    ])
     await run('reg', [
       'delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
       '/v', 'AutoConfigURL', '/f'
     ]).catch(() => { /* key may not exist */ })
   } else if (process.platform === 'linux') {
+    await run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'manual']).catch(() => {})
+    await run('gsettings', ['set', 'org.gnome.system.proxy.http', 'host', '127.0.0.1']).catch(() => {})
+    await run('gsettings', ['set', 'org.gnome.system.proxy.http', 'port', port]).catch(() => {})
+    await run('gsettings', ['set', 'org.gnome.system.proxy.https', 'host', '127.0.0.1']).catch(() => {})
+    await run('gsettings', ['set', 'org.gnome.system.proxy.https', 'port', port]).catch(() => {})
+  }
+}
+
+export async function clearSystemProxy(): Promise<void> {
+  console.log('[proxy] clearing system proxy')
+  if (process.platform === 'darwin') {
+    const services = await getMacNetworkServices()
+    for (const svc of services) {
+      try {
+        await run('networksetup', ['-setwebproxystate', svc, 'off'])
+        await run('networksetup', ['-setsecurewebproxystate', svc, 'off'])
+      } catch { /* skip */ }
+    }
+  } else if (process.platform === 'win32') {
+    await run('reg', [
+      'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'
+    ]).catch(() => {})
+    await run('reg', [
+      'delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v', 'ProxyServer', '/f'
+    ]).catch(() => { /* key may not exist */ })
+  } else if (process.platform === 'linux') {
     await run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'none']).catch(() => {})
   }
   clearShellProxy()
+}
+
+export function checkSystemProxy(): Promise<boolean> {
+  const expected = String(LOCAL_PORT)
+  return new Promise((resolve) => {
+    if (process.platform === 'darwin') {
+      execFile('scutil', ['--proxy'], (err, stdout) => {
+        if (err) { resolve(false); return }
+        const httpEnabled = /HTTPEnable\s*:\s*1/.test(stdout)
+        const portMatch = stdout.match(/HTTPPort\s*:\s*(\d+)/)
+        resolve(httpEnabled && portMatch?.[1] === expected)
+      })
+    } else if (process.platform === 'win32') {
+      execFile('reg', [
+        'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+        '/v', 'ProxyServer'
+      ], (err, stdout) => {
+        if (err) { resolve(false); return }
+        const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/)
+        resolve(match?.[1]?.trim() === `127.0.0.1:${expected}`)
+      })
+    } else {
+      resolve(true)
+    }
+  })
+}
+
+export function probePreProxy(host: string, port: number): Promise<{ ok: boolean; latency?: number; error?: string }> {
+  const net = require('node:net') as typeof import('node:net')
+  return new Promise((resolve) => {
+    const start = Date.now()
+    const sock = net.createConnection({ host, port }, () => {
+      const latency = Date.now() - start
+      sock.destroy()
+      resolve({ ok: true, latency })
+    })
+    sock.on('error', (err) => resolve({ ok: false, error: err.message }))
+    sock.setTimeout(5000, () => { sock.destroy(); resolve({ ok: false, error: 'Timeout' }) })
+  })
 }
 
 // ── Terminal proxy via shell env ──
