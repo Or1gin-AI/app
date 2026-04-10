@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -813,12 +813,14 @@ ipcMain.handle('settings:set', (_e, settings: AppSettings) => {
 function setupAutoUpdater(): void {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
+  let pendingVersion = ''
 
   autoUpdater.on('checking-for-update', () => {
     broadcast('updater:status', { status: 'checking' })
   })
 
   autoUpdater.on('update-available', (info) => {
+    pendingVersion = info.version
     broadcast('updater:status', { status: 'available', version: info.version })
   })
 
@@ -829,11 +831,13 @@ function setupAutoUpdater(): void {
   autoUpdater.on('download-progress', (progress) => {
     broadcast('updater:status', {
       status: 'downloading',
+      version: pendingVersion,
       percent: Math.round(progress.percent),
     })
   })
 
   autoUpdater.on('update-downloaded', (info) => {
+    pendingVersion = info.version
     broadcast('updater:status', { status: 'downloaded', version: info.version })
   })
 
@@ -856,7 +860,12 @@ function broadcast(channel: string, data: unknown): void {
   }
 }
 
-ipcMain.handle('updater:install', () => {
+ipcMain.handle('updater:install', async () => {
+  // Clean up proxy before restarting — before-quit may not complete during quitAndInstall
+  stopProxyMonitor()
+  clearShellProxy()
+  await clearSystemProxy().catch(() => {})
+  await stopSidecar()
   autoUpdater.quitAndInstall(false, true)
 })
 
