@@ -937,7 +937,7 @@ ipcMain.handle('updater:check', () => {
 app.whenReady().then(async () => {
   // Clean up any orphaned processes left by a previous crash
   killOrphanedSidecar()
-  killOrphanedHelper()
+  await killOrphanedHelper()
 
   // Crash recovery: if system proxy points to our port but Xray isn't running, clean up
   // MUST complete before creating window — stale proxy breaks Cloudflare Turnstile loading

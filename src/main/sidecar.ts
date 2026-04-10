@@ -459,27 +459,31 @@ export function startHelper(): void {
 
 export function stopHelper(): void {
   if (helperProcess) {
-    const pid = helperProcess.pid
+    const proc = helperProcess
     helperProcess = null
-    if (process.platform === 'win32' && pid) {
+    if (process.platform === 'win32' && proc.pid) {
       // Windows: SIGTERM doesn't work on detached processes, use taskkill
-      execFile('taskkill', ['/F', '/PID', String(pid)], () => {})
+      execFile('taskkill', ['/F', '/PID', String(proc.pid)], () => {})
     } else {
-      try { helperProcess?.kill('SIGTERM') } catch { /* already dead */ }
+      try { proc.kill('SIGTERM') } catch { /* already dead */ }
     }
   }
 }
 
-/** Kill any orphaned helper processes (startup cleanup) */
-export function killOrphanedHelper(): void {
-  try {
-    if (process.platform === 'win32') {
-      execFile('taskkill', ['/F', '/IM', 'originai-helper.exe'], () => {})
-    } else {
-      const binary = getHelperBinary()
-      execFile('pkill', ['-f', binary], () => {})
-    }
-  } catch { /* best effort */ }
+/** Kill any orphaned helper processes (startup cleanup). Returns a promise so caller can await. */
+export function killOrphanedHelper(): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/F', '/IM', 'originai-helper.exe'], () => resolve())
+      } else {
+        const binary = getHelperBinary()
+        execFile('pkill', ['-f', binary], () => resolve())
+      }
+    } catch { resolve() }
+    // Safety timeout — don't block startup forever
+    setTimeout(resolve, 3000)
+  })
 }
 
 // ── System proxy management ──
@@ -583,13 +587,16 @@ export function checkSystemProxy(): Promise<boolean> {
         resolve(httpEnabled && portMatch?.[1] === expected)
       })
     } else if (process.platform === 'win32') {
+      // Must check both ProxyEnable AND ProxyServer
       execFile('reg', [
         'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-        '/v', 'ProxyServer'
       ], (err, stdout) => {
         if (err) { resolve(false); return }
-        const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/)
-        resolve(match?.[1]?.trim() === `127.0.0.1:${expected}`)
+        const enableMatch = /ProxyEnable\s+REG_DWORD\s+0x(\d+)/.exec(stdout)
+        const enabled = enableMatch && parseInt(enableMatch[1], 16) === 1
+        const serverMatch = /ProxyServer\s+REG_SZ\s+(.+)/.exec(stdout)
+        const serverOk = serverMatch && serverMatch[1].trim() === `127.0.0.1:${expected}`
+        resolve(!!enabled && !!serverOk)
       })
     } else {
       resolve(true)
