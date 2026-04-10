@@ -6,7 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper, scanLocalPorts } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, probePreProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, scanLocalPorts } from './sidecar'
 
 const API_BASE = 'https://dev.originai.cc'
 
@@ -935,8 +935,9 @@ ipcMain.handle('updater:check', () => {
 })
 
 app.whenReady().then(async () => {
-  // Clean up any sing-box left by a previous crash
+  // Clean up any orphaned processes left by a previous crash
   killOrphanedSidecar()
+  killOrphanedHelper()
 
   // Crash recovery: if system proxy points to our port but Xray isn't running, clean up
   // MUST complete before creating window — stale proxy breaks Cloudflare Turnstile loading
