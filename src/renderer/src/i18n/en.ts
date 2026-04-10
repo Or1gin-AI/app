@@ -163,6 +163,7 @@ export const en = {
     desc: 'Proxy service is running. Claude traffic is routed through the optimization tunnel.',
     descError: 'Proxy connection lost. Please reconfigure.',
     proxyStatus: 'Proxy Status',
+    upstreamProxy: 'Upstream Proxy',
     systemProxy: 'System Proxy',
     hijacked: 'Overridden by other software',
     titleConflict: 'Proxy Conflict',
