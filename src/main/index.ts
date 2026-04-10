@@ -875,21 +875,10 @@ ipcMain.handle('sidecar:probe-pre-proxy', async (_e, host: string, port: number)
 })
 
 ipcMain.handle('sidecar:verify', async () => {
-  // Session proxy is already set to Xray at this point, so net.fetch goes through the tunnel.
-  // Using HTTPS via Electron's network stack avoids HTTP redirect and curl issues on Windows.
-  for (const url of ['https://api.ipify.org', 'https://api4.ipify.org']) {
-    try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 20_000)
-      const resp = await net.fetch(url, { signal: controller.signal })
-      clearTimeout(timer)
-      if (resp.ok) {
-        const text = (await resp.text()).trim()
-        if (isValidIp(text)) return { ok: true, ip: text }
-      }
-    } catch { /* try next */ }
-  }
-  return { ok: false, error: 'Verification failed — could not reach IP check service through tunnel' }
+  // Use the sidecar's own low-level verification path instead of Chromium net.fetch.
+  // This avoids Windows CONNECT/TLS edge cases when Xray itself is chained through
+  // an upstream local HTTP proxy such as Clash on 127.0.0.1:7890.
+  return verifySidecar()
 })
 
 // Settings IPC
