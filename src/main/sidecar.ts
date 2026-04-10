@@ -148,8 +148,9 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
         'domain:intercom.io',
         'domain:intercomcdn.com',
         'domain:facebook.net',
-        // IP check: ipify is whitelisted (proxy tunnel), checkip.amazonaws is NOT (direct)
+        // IP check: whitelisted (proxy tunnel); checkip.amazonaws is NOT (direct)
         'domain:ipify.org',
+        'domain:ifconfig.me',
       ],
     },
   ]
@@ -332,6 +333,7 @@ export async function verifySidecar(): Promise<{ ok: boolean; ip?: string; error
   // Try curl first (most reliable on macOS/Linux)
   const curlResult = await new Promise<string | null>((resolve) => {
     exec('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${LOCAL_HTTP_PORT}`, 'https://api.ipify.org'],
+      { windowsHide: true },
       (err, stdout) => {
         const ip = !err && stdout ? stdout.trim() : ''
         resolve(isValidIp(ip) ? ip : null)
@@ -344,7 +346,7 @@ export async function verifySidecar(): Promise<{ ok: boolean; ip?: string; error
   }
 
   // Fallback: Node.js http through proxy (works on Windows without curl issues)
-  const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org')
+  const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org') || await verifyViaHttp('ifconfig.me')
 
   if (httpResult) {
     return { ok: true, ip: httpResult }
@@ -403,9 +405,8 @@ export function killOrphanedSidecar(): void {
   try {
     const binary = getSidecarBinary()
     if (process.platform === 'win32') {
-      execFile('taskkill', ['/F', '/IM', 'xray.exe'], () => {})
+      execFile('taskkill', ['/F', '/IM', 'xray.exe'], { windowsHide: true }, () => {})
     } else {
-      // Only kill our specific xray binary, not other processes
       execFile('pkill', ['-f', binary], () => {})
     }
   } catch { /* best effort */ }
@@ -480,8 +481,7 @@ export function stopHelper(): void {
     const proc = helperProcess
     helperProcess = null
     if (process.platform === 'win32' && proc.pid) {
-      // Windows: SIGTERM doesn't work on detached processes, use taskkill
-      execFile('taskkill', ['/F', '/PID', String(proc.pid)], () => {})
+      execFile('taskkill', ['/F', '/PID', String(proc.pid)], { windowsHide: true }, () => {})
     } else {
       try { proc.kill('SIGTERM') } catch { /* already dead */ }
     }
@@ -493,7 +493,7 @@ export function killOrphanedHelper(): Promise<void> {
   return new Promise((resolve) => {
     try {
       if (process.platform === 'win32') {
-        execFile('taskkill', ['/F', '/IM', 'originai-helper.exe'], () => resolve())
+        execFile('taskkill', ['/F', '/IM', 'originai-helper.exe'], { windowsHide: true }, () => resolve())
       } else {
         const binary = getHelperBinary()
         execFile('pkill', ['-f', binary], () => resolve())
@@ -508,7 +508,7 @@ export function killOrphanedHelper(): Promise<void> {
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, (err) => (err ? reject(err) : resolve()))
+    execFile(cmd, args, { windowsHide: true }, (err) => (err ? reject(err) : resolve()))
   })
 }
 
@@ -596,9 +596,10 @@ export async function clearSystemProxy(): Promise<void> {
 
 export function checkSystemProxy(): Promise<boolean> {
   const expected = String(LOCAL_PORT)
+  const opts = { windowsHide: true }
   return new Promise((resolve) => {
     if (process.platform === 'darwin') {
-      execFile('scutil', ['--proxy'], (err, stdout) => {
+      execFile('scutil', ['--proxy'], opts, (err, stdout) => {
         if (err) { resolve(false); return }
         const httpEnabled = /HTTPEnable\s*:\s*1/.test(stdout)
         const portMatch = stdout.match(/HTTPPort\s*:\s*(\d+)/)
@@ -608,7 +609,7 @@ export function checkSystemProxy(): Promise<boolean> {
       execFile('reg', [
         'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
         '/v', 'ProxyServer'
-      ], (err, stdout) => {
+      ], opts, (err, stdout) => {
         if (err) { resolve(false); return }
         const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/)
         resolve(match?.[1]?.trim() === `127.0.0.1:${expected}`)
@@ -731,10 +732,10 @@ function getWindowsPowerShellProfiles(): string[] {
 export function setShellProxy(): void {
   if (process.platform === 'win32') {
     try {
-      execFile('setx', ['http_proxy', PROXY_URL], () => {})
-      execFile('setx', ['https_proxy', PROXY_URL], () => {})
-      execFile('setx', ['HTTP_PROXY', PROXY_URL], () => {})
-      execFile('setx', ['HTTPS_PROXY', PROXY_URL], () => {})
+      execFile('setx', ['http_proxy', PROXY_URL], { windowsHide: true }, () => {})
+      execFile('setx', ['https_proxy', PROXY_URL], { windowsHide: true }, () => {})
+      execFile('setx', ['HTTP_PROXY', PROXY_URL], { windowsHide: true }, () => {})
+      execFile('setx', ['HTTPS_PROXY', PROXY_URL], { windowsHide: true }, () => {})
     } catch { /* */ }
     // Also inject into PowerShell profiles
     for (const profile of getWindowsPowerShellProfiles()) {
@@ -774,10 +775,10 @@ export function setShellProxy(): void {
 export function clearShellProxy(): void {
   if (process.platform === 'win32') {
     try {
-      execFile('setx', ['http_proxy', ''], () => {})
-      execFile('setx', ['https_proxy', ''], () => {})
-      execFile('setx', ['HTTP_PROXY', ''], () => {})
-      execFile('setx', ['HTTPS_PROXY', ''], () => {})
+      execFile('setx', ['http_proxy', ''], { windowsHide: true }, () => {})
+      execFile('setx', ['https_proxy', ''], { windowsHide: true }, () => {})
+      execFile('setx', ['HTTP_PROXY', ''], { windowsHide: true }, () => {})
+      execFile('setx', ['HTTPS_PROXY', ''], { windowsHide: true }, () => {})
     } catch { /* */ }
     // Clean PowerShell profiles
     for (const profile of getWindowsPowerShellProfiles()) {

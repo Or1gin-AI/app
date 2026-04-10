@@ -45,6 +45,8 @@ var (
 const (
 	mbOK          = 0x00000000
 	mbIconWarning = 0x00000030
+	mbTopMost     = 0x00040000
+	mbSetForeground = 0x00010000
 )
 
 func showDialog() {
@@ -55,6 +57,6 @@ func showDialog() {
 		0,
 		uintptr(unsafe.Pointer(msgPtr)),
 		uintptr(unsafe.Pointer(titlePtr)),
-		uintptr(mbOK|mbIconWarning),
+		uintptr(mbOK|mbIconWarning|mbTopMost|mbSetForeground),
 	)
 }

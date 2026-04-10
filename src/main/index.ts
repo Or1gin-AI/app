@@ -296,7 +296,7 @@ async function fetchExitIpViaProxy(): Promise<string | null> {
   const port = getLocalPort()
   const http = require('node:http') as typeof import('node:http')
 
-  for (const host of ['api.ipify.org', 'api4.ipify.org']) {
+  for (const host of ['api.ipify.org', 'api4.ipify.org', 'ifconfig.me']) {
     const raw = await new Promise<string | null>((resolve) => {
       const req = http.request({
         host: '127.0.0.1',
