@@ -382,6 +382,65 @@ export function getLocalPort(): number {
   return LOCAL_PORT
 }
 
+// ── Helper (watchdog) process management ──
+
+let helperProcess: ChildProcess | null = null
+
+function getHelperBinary(): string {
+  const platform = process.platform
+  const binaryName = platform === 'win32' ? 'originai-helper.exe' : 'originai-helper'
+
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'sidecar', binaryName)
+  }
+
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+  return join(app.getAppPath(), 'resources', 'sidecar', `${platform}-${arch}`, binaryName)
+}
+
+export function startHelper(): void {
+  stopHelper()
+  const xrayPid = sidecarProcess?.pid
+  if (!xrayPid) return
+
+  const binary = getHelperBinary()
+  if (!existsSync(binary)) {
+    console.warn('[helper] binary not found:', binary)
+    return
+  }
+
+  const args = [
+    '--pid', String(process.pid),
+    '--port', String(LOCAL_PORT),
+    '--xray-pid', String(xrayPid),
+  ]
+
+  console.log('[helper] starting:', binary, args.join(' '))
+  helperProcess = spawn(binary, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+    windowsHide: true,
+  })
+
+  helperProcess.stdout?.on('data', (d: Buffer) => console.log('[helper]', d.toString().trimEnd()))
+  helperProcess.stderr?.on('data', (d: Buffer) => console.error('[helper]', d.toString().trimEnd()))
+  helperProcess.on('exit', (code) => {
+    console.log('[helper] exited with code', code)
+    helperProcess = null
+  })
+
+  // Unref so helper doesn't prevent Electron from exiting
+  helperProcess.unref()
+}
+
+export function stopHelper(): void {
+  if (helperProcess) {
+    const proc = helperProcess
+    helperProcess = null
+    try { proc.kill('SIGTERM') } catch { /* already dead */ }
+  }
+}
+
 // ── System proxy management ──
 
 function run(cmd: string, args: string[]): Promise<void> {
