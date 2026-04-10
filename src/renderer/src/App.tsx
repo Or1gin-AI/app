@@ -92,8 +92,12 @@ function App(): React.JSX.Element {
   const [updatePercent, setUpdatePercent] = useState<number>(0)
 
   // Listen for auto-update events
+  const updateLockedRef = useRef(false)
   useEffect(() => {
     const cleanup = window.electronAPI.updater.onStatus((data) => {
+      // Once downloaded, lock the overlay — don't let hourly re-checks dismiss it
+      if (updateLockedRef.current) return
+      if (data.status === 'downloaded') updateLockedRef.current = true
       setUpdateStatus(data.status)
       if (data.version) setUpdateVersion(data.version)
       if (data.percent !== undefined) setUpdatePercent(data.percent)
