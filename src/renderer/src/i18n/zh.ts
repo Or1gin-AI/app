@@ -137,6 +137,7 @@ export const zh = {
       requesting: '正在提取链接...',
       success: '登录链接已在浏览器中打开',
       noEmail: '未收到登录链接，请确保已在 claude.ai 上请求登录',
+      noEmailYet: '暂未收到登录链接，正在轮询中...',
       noLink: '邮件中未找到登录链接',
       retryAfter: '{time} 后可重试',
       errorGeneric: '获取登录链接失败',
