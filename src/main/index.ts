@@ -231,12 +231,12 @@ function createWindow(): void {
 
 // --- IP detection helpers ---
 
-/** Direct IP fetch (no proxy) — used for initial network detection before Xray starts */
+/** Fetch IP through user's normal network path (respects system proxy / Clash if active) */
 function fetchExitIpDirect(): Promise<string | null> {
   const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
-    // checkip.amazonaws.com is NOT in Xray routing rules, so even if system proxy is set it goes direct
-    execFile('curl', ['-4', '-s', '--noproxy', '*', '--max-time', '10', 'https://checkip.amazonaws.com'], (err, stdout) => {
+    // No --noproxy: let curl use the user's system proxy (e.g. Clash) so we show their real browsing exit IP
+    execFile('curl', ['-4', '-s', '--max-time', '10', 'https://checkip.amazonaws.com'], (err, stdout) => {
       if (err) { resolve(null); return }
       resolve(stdout.trim() || null)
     })

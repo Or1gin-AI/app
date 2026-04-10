@@ -297,31 +297,52 @@ export async function startSidecar(proxyPassword: string, preProxy?: string): Pr
   })
 }
 
-/** Verify proxy works: curl through local proxy to check exit IP */
-export function verifySidecar(): Promise<{ ok: boolean; ip?: string; error?: string }> {
-  const { execFile: exec } = require('child_process') as typeof import('child_process')
-  // Only use whitelisted IP services — these go through Trojan tunnel, same path as anthropic.com
-  const endpoints = ['https://api.ipify.org', 'https://api4.ipify.org']
+/** Verify via Node.js http module through local proxy (cross-platform, no curl dependency) */
+function verifyViaHttp(targetHost: string): Promise<string | null> {
+  const http = require('node:http') as typeof import('node:http')
   return new Promise((resolve) => {
-    let resolved = false
-    let remaining = endpoints.length
-
-    for (const url of endpoints) {
-      exec('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${LOCAL_HTTP_PORT}`, url],
-        (err, stdout) => {
-          if (resolved) return
-          remaining--
-          const ip = !err && stdout ? stdout.trim() : ''
-          if (ip) {
-            resolved = true
-            resolve({ ok: true, ip })
-          } else if (remaining <= 0) {
-            resolve({ ok: false, error: err?.message || 'All IP check endpoints failed' })
-          }
-        }
-      )
-    }
+    const req = http.request({
+      host: '127.0.0.1',
+      port: LOCAL_HTTP_PORT,
+      path: `http://${targetHost}/`,
+      method: 'GET',
+      headers: { Host: targetHost },
+    }, (res) => {
+      let data = ''
+      res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+      res.on('end', () => resolve(data.trim() || null))
+    })
+    req.on('error', () => resolve(null))
+    req.setTimeout(20_000, () => { req.destroy(); resolve(null) })
+    req.end()
   })
+}
+
+/** Verify proxy works: try curl first, fallback to Node.js http (for Windows compatibility) */
+export async function verifySidecar(): Promise<{ ok: boolean; ip?: string; error?: string }> {
+  const { execFile: exec } = require('child_process') as typeof import('child_process')
+
+  // Try curl first (most reliable on macOS/Linux)
+  const curlResult = await new Promise<string | null>((resolve) => {
+    exec('curl', ['-4', '-s', '--max-time', '20', '-x', `http://127.0.0.1:${LOCAL_HTTP_PORT}`, 'https://api.ipify.org'],
+      (err, stdout) => {
+        resolve(!err && stdout ? stdout.trim() : null)
+      }
+    )
+  })
+
+  if (curlResult) {
+    return { ok: true, ip: curlResult }
+  }
+
+  // Fallback: Node.js http through proxy (works on Windows without curl issues)
+  const httpResult = await verifyViaHttp('api.ipify.org') || await verifyViaHttp('api4.ipify.org')
+
+  if (httpResult) {
+    return { ok: true, ip: httpResult }
+  }
+
+  return { ok: false, error: 'All verification methods failed' }
 }
 
 export async function stopSidecar(): Promise<void> {
