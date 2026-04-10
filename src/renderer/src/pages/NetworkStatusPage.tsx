@@ -40,10 +40,19 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
     let cancelled = false
 
     async function check() {
-      const [directRes, proxyRes, statusRes] = await Promise.all([
+      // First check if sidecar is actually running — if not, nothing to show
+      const statusRes = await window.electronAPI.sidecar.proxyStatus()
+      if (!statusRes.running) {
+        if (!cancelled) {
+          setProxyOk(false)
+          setLoading(false)
+        }
+        return
+      }
+
+      const [directRes, proxyRes] = await Promise.all([
         window.electronAPI.checkLocalIp(),
         window.electronAPI.checkProxyIp(),
-        window.electronAPI.sidecar.proxyStatus()
       ])
 
       if (cancelled) return

@@ -285,8 +285,9 @@ function App(): React.JSX.Element {
     setPage('main')
   }, [userPlan])
 
-  const handleNetworkClick = useCallback(() => {
-    setPage('network-status')
+  const handleNetworkClick = useCallback(async () => {
+    const status = await window.electronAPI.sidecar.status()
+    setPage(status.running ? 'network-status' : 'network')
   }, [])
 
   const handleNetworkStatusBack = useCallback(() => {
