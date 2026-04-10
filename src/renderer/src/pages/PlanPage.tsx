@@ -537,8 +537,6 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
       <AnimatePresence>
         {showTickets && (
           <TicketPanel
-            userId={userEmail}
-            userName={userEmail.split('@')[0]}
             onClose={() => setShowTickets(false)}
           />
         )}
