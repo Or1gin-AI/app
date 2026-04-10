@@ -631,16 +631,18 @@ const TICKET_API = process.env.TICKET_API_BASE || 'https://api-ticket.originai.c
 async function ticketFetch(
   method: string,
   path: string,
-  userId: string,
-  userName: string,
   body?: Record<string, unknown>
 ): Promise<{ status: number; data: unknown }> {
   const url = `${TICKET_API}${path}`
   console.log(`[ticket] ${method} ${url}`)
+  const sessionToken = getSessionToken()
+  if (!sessionToken) {
+    return { status: 401, data: { message: 'Not authenticated' } }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-User-Id': userId,
-    'X-User-Name': encodeURIComponent(userName || 'Anonymous'),
+    'Authorization': `Bearer ${sessionToken}`,
   }
   try {
     const resp = await net.fetch(url, {
@@ -659,24 +661,30 @@ async function ticketFetch(
   }
 }
 
-ipcMain.handle('ticket:list', async (_e, userId: string, userName: string, params: string) => {
-  return ticketFetch('GET', `/api/tickets?${params}`, userId, userName)
+function getSessionToken(): string | null {
+  const cookie = sessionCookies.find((item) => item.startsWith('better-auth.session_token='))
+  if (!cookie) return null
+  return cookie.slice('better-auth.session_token='.length)
+}
+
+ipcMain.handle('ticket:list', async (_e, params: string) => {
+  return ticketFetch('GET', `/api/tickets?${params}`)
 })
 
-ipcMain.handle('ticket:detail', async (_e, userId: string, userName: string, ticketId: string) => {
-  return ticketFetch('GET', `/api/tickets/${ticketId}`, userId, userName)
+ipcMain.handle('ticket:detail', async (_e, ticketId: string) => {
+  return ticketFetch('GET', `/api/tickets/${ticketId}`)
 })
 
-ipcMain.handle('ticket:create', async (_e, userId: string, userName: string, body: Record<string, unknown>) => {
-  return ticketFetch('POST', '/api/tickets', userId, userName, body)
+ipcMain.handle('ticket:create', async (_e, body: Record<string, unknown>) => {
+  return ticketFetch('POST', '/api/tickets', body)
 })
 
-ipcMain.handle('ticket:timeline', async (_e, userId: string, userName: string, ticketId: string) => {
-  return ticketFetch('GET', `/api/tickets/${ticketId}/timeline`, userId, userName)
+ipcMain.handle('ticket:timeline', async (_e, ticketId: string) => {
+  return ticketFetch('GET', `/api/tickets/${ticketId}/timeline`)
 })
 
-ipcMain.handle('ticket:comment', async (_e, userId: string, userName: string, ticketId: string, content: string) => {
-  return ticketFetch('POST', `/api/tickets/${ticketId}/comments`, userId, userName, { content })
+ipcMain.handle('ticket:comment', async (_e, ticketId: string, content: string) => {
+  return ticketFetch('POST', `/api/tickets/${ticketId}/comments`, { content })
 })
 
 // Sidecar IPC handlers
