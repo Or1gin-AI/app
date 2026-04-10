@@ -859,17 +859,23 @@ ipcMain.handle('updater:check', () => {
   autoUpdater.checkForUpdates().catch(() => { })
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Clean up any sing-box left by a previous crash
   killOrphanedSidecar()
 
   // Crash recovery: if system proxy points to our port but Xray isn't running, clean up
-  checkSystemProxy().then((ours) => {
+  // MUST complete before creating window — stale proxy breaks Cloudflare Turnstile loading
+  const hadStaleProxy = await checkSystemProxy().then(async (ours) => {
     if (ours && !isSidecarRunning()) {
       console.log('[proxy] stale system proxy detected from previous crash, cleaning up')
-      clearSystemProxy().catch(() => {})
+      await clearSystemProxy().catch(() => {})
+      return true
     }
+    return false
   })
+
+  // Expose cleanup result so renderer can show a brief notice if needed
+  ipcMain.handle('proxy:had-stale-cleanup', () => hadStaleProxy)
 
   electronApp.setAppUserModelId('com.originai.app')
 

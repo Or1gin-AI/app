@@ -102,8 +102,6 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     setStep(3)
     setProgress(75)
     const verifyResult = await window.electronAPI.sidecar.verify()
-    console.log('*************************************8')
-    console.log(verifyResult)
     if (!verifyResult.ok) {
       setOptimizeError(verifyResult.error || 'Connection verification failed')
       return

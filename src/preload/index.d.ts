@@ -103,6 +103,7 @@ declare global {
         onStatus: (cb: (data: { ok: boolean; ip: string | null }) => void) => () => void
       }
       proxy: {
+        hadStaleCleanup: () => Promise<boolean>
         onConflict: (cb: (data: { hijacked: boolean }) => void) => () => void
       }
       updater: {

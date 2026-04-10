@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   proxy: {
+    hadStaleCleanup: () => ipcRenderer.invoke('proxy:had-stale-cleanup'),
     onConflict: (cb: (data: { hijacked: boolean }) => void) => {
       const handler = (_: unknown, data: { hijacked: boolean }) => cb(data)
       ipcRenderer.on('proxy:conflict', handler)
