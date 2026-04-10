@@ -154,6 +154,7 @@ export const en = {
       title: 'CLI Version',
       desc: 'Login with web account via OAuth',
       descLine2: 'Authentic official experience',
+      newTerminalWarning: 'You must open a new terminal session after network optimization is enabled, or proxy settings will not take effect.',
       step1: 'Open terminal, run',
       step2: 'Select',
       step2method: 'Use OAuth',
