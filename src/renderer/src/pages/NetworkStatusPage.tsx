@@ -14,28 +14,35 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
   const [localIp, setLocalIp] = useState<string | null>(null)
   const [proxyIp, setProxyIp] = useState<string | null>(null)
   const [proxyOk, setProxyOk] = useState(false)
-  const [pacOk, setPacOk] = useState(false)
+  const [proxyPort, setProxyPort] = useState<number>(0)
+  const [conflict, setConflict] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     async function check() {
-      const [directRes, proxyRes, pacRes] = await Promise.all([
+      const [directRes, proxyRes, statusRes] = await Promise.all([
         window.electronAPI.checkLocalIp(),
         window.electronAPI.checkProxyIp(),
-        window.electronAPI.sidecar.pacStatus()
+        window.electronAPI.sidecar.proxyStatus()
       ])
 
       if (cancelled) return
       setLocalIp(directRes.ip)
       setProxyIp(proxyRes.ip)
       setProxyOk(proxyRes.ok)
-      setPacOk(pacRes.running)
+      setProxyPort(statusRes.port)
       setLoading(false)
     }
 
     check()
-    return () => { cancelled = true }
+
+    // Listen for proxy conflict events
+    const unsub = window.electronAPI.proxy.onConflict(() => {
+      setConflict(true)
+    })
+
+    return () => { cancelled = true; unsub() }
   }, [])
 
   if (loading) {
@@ -49,15 +56,15 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-12 py-8">
-      <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${proxyOk ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-        {proxyOk ? <PiCheckCircleBold size={24} className="text-green-500" /> : <PiWarningBold size={24} className="text-red-500" />}
+      <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${proxyOk && !conflict ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+        {proxyOk && !conflict ? <PiCheckCircleBold size={24} className="text-green-500" /> : <PiWarningBold size={24} className="text-red-500" />}
       </div>
 
       <h2 className="font-serif text-xl text-text mb-1.5">
-        {proxyOk ? t.networkStatus.title : t.networkStatus.titleError}
+        {conflict ? t.networkStatus.titleConflict : proxyOk ? t.networkStatus.title : t.networkStatus.titleError}
       </h2>
-      <p className="text-[13px] text-text-muted mb-6 text-center">
-        {proxyOk ? t.networkStatus.desc : t.networkStatus.descError}
+      <p className="text-[13px] text-text-muted mb-6 text-center max-w-[380px]">
+        {conflict ? t.networkStatus.descConflict : proxyOk ? t.networkStatus.desc : t.networkStatus.descError}
       </p>
 
       <div className="w-full max-w-[380px] bg-bg-card rounded-xl border border-border p-4 mb-6">
@@ -69,25 +76,25 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-text-faint text-[11px]">{t.networkStatus.pacStatus}</span>
-            <span className={pacOk ? 'text-green-600' : 'text-red-500'}>
-              {pacOk ? t.networkStatus.running : t.networkStatus.stopped}
+            <span className="text-text-faint text-[11px]">{t.networkStatus.systemProxy}</span>
+            <span className={conflict ? 'text-red-500' : 'text-green-600'}>
+              {conflict ? t.networkStatus.hijacked : `127.0.0.1:${proxyPort}`}
             </span>
           </div>
           <div className="border-t border-border" />
           <div className="flex items-center justify-between">
             <span className="text-text-faint text-[11px]">{t.networkStatus.localIp}</span>
-            <span className="text-text-secondary">{localIp || '—'}</span>
+            <span className="text-text-secondary">{localIp || '\u2014'}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-text-faint text-[11px]">{t.networkStatus.proxyIp}</span>
-            <span className={proxyOk ? 'text-green-600' : 'text-red-500'}>{proxyIp || '—'}</span>
+            <span className={proxyOk ? 'text-green-600' : 'text-red-500'}>{proxyIp || '\u2014'}</span>
           </div>
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        {proxyOk ? (
+        {proxyOk && !conflict ? (
           <>
             <button
               onClick={onBack}
