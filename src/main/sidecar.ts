@@ -16,9 +16,14 @@ export function onSidecarCrash(cb: (reason: string) => void): void {
 }
 
 const REMOTE = {
-  address: '13.113.99.64',
-  port: 8443,
+  address: 'p.originai.cc',
+  port: 443,
+  serverName: 'p.originai.cc',
+  wsPath: '/update',
+  method: 'aes-256-gcm',
 }
+
+type UpstreamProtocol = 'http' | 'socks'
 
 let sidecarProcess: ChildProcess | null = null
 let sidecarStopping = false // true when intentionally stopping
@@ -43,30 +48,46 @@ function getConfigDir(): string {
   return dir
 }
 
-function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPort?: number): object {
+function generateConfig(
+  proxyPassword: string,
+  preProxyHost?: string,
+  preProxyPort?: number,
+  preProxyProtocol: UpstreamProtocol = 'http'
+): object {
   const usePreProxy = preProxyHost && preProxyPort
+  const preProxySettings = usePreProxy
+    ? {
+        servers: [
+          {
+            address: preProxyHost,
+            port: preProxyPort,
+          },
+        ],
+      }
+    : undefined
 
   const proxyOutbound: Record<string, unknown> = {
     tag: 'proxy',
-    protocol: 'trojan',
+    protocol: 'shadowsocks',
     settings: {
       servers: [
         {
           address: REMOTE.address,
           port: REMOTE.port,
+          method: REMOTE.method,
           password: proxyPassword,
-          level: 0,
         },
       ],
     },
     streamSettings: {
-      network: 'tcp',
-      security: 'reality',
-      realitySettings: {
-        serverName: 'pan.baidu.com',
+      network: 'ws',
+      security: 'tls',
+      tlsSettings: {
+        serverName: REMOTE.serverName,
         fingerprint: 'chrome',
-        publicKey: 'U2T3fs72Gsg1lRLRGZ1TJ5gsLt8sARj_nGfoGBgm4FY',
-        shortId: '79153c2f47ee11f5',
+      },
+      wsSettings: {
+        path: REMOTE.wsPath,
       },
     },
   }
@@ -75,35 +96,23 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     proxyOutbound.proxySettings = { tag: 'pre-proxy' }
   }
 
-  // The first outbound is the default for unmatched traffic.
-  // With pre-proxy: upstream (forwards non-Claude traffic to Clash)
-  // Without pre-proxy: direct (freedom)
   const outbounds: Record<string, unknown>[] = []
 
   if (usePreProxy) {
     outbounds.push(
-      {
-        tag: 'upstream',
-        protocol: 'http',
-        settings: {
-          servers: [{ address: preProxyHost, port: preProxyPort }],
-        },
-      },
       proxyOutbound,
       {
         tag: 'pre-proxy',
-        protocol: 'http',
-        settings: {
-          servers: [{ address: preProxyHost, port: preProxyPort }],
-        },
+        protocol: preProxyProtocol,
+        settings: preProxySettings,
       },
       { tag: 'direct', protocol: 'freedom' },
       { tag: 'block', protocol: 'blackhole' },
     )
   } else {
     outbounds.push(
-      { tag: 'direct', protocol: 'freedom' },
       proxyOutbound,
+      { tag: 'direct', protocol: 'freedom' },
       { tag: 'block', protocol: 'blackhole' },
     )
   }
@@ -111,57 +120,20 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
   const routingRules: Record<string, unknown>[] = [
     {
       type: 'field',
-      outboundTag: 'proxy',
-      domain: [
-        // Core services
-        'domain:anthropic.com',
-        'domain:anthropic.co',
-        'domain:claude.ai',
-        'domain:claude.com',
-        'domain:claudeusercontent.com',
-        'domain:storage.googleapis.com',
-        // Telemetry / analytics
-        'domain:datadoghq.com',
-        'domain:datadog.com',
-        'domain:ddog-gov.com',
-        'domain:datadoghq.eu',
-        'domain:browser-intake-us5-datadoghq.com',
-        'domain:browser-intake-datadoghq.com',
-        'domain:browser-intake-us3-datadoghq.com',
-        'domain:browser-intake-us1-datadoghq.com',
-        'domain:sentry.io',
-        'domain:statsigapi.net',
-        'domain:statsig.com',
-        'domain:segment.io',
-        'domain:growthbook.io',
-        'domain:split.io',
-        'domain:intellimize.co',
-        // Wildcard patterns
-        'regexp:.*anthropic.*',
-        'regexp:.*claude.*',
-        'regexp:.*datadog.*',
-        'regexp:.*ddog.*',
-        'regexp:.*sentry.*',
-        'regexp:.*statsig.*',
-        'regexp:.*intercom.*',
-        // Third-party integrations
-        'domain:intercom.io',
-        'domain:intercomcdn.com',
-        'domain:facebook.net',
-        // IP check: whitelisted (proxy tunnel); checkip.amazonaws is NOT (direct)
-        'domain:ipify.org',
-      ],
+      outboundTag: 'direct',
+      domain: ['geosite:cn'],
     },
-  ]
-
-  // When upstream exists, route private/LAN IPs directly (skip Clash)
-  if (usePreProxy) {
-    routingRules.push({
+    {
       type: 'field',
       outboundTag: 'direct',
-      ip: ['geoip:private'],
-    })
-  }
+      ip: ['geoip:cn', 'geoip:private'],
+    },
+    {
+      type: 'field',
+      outboundTag: 'proxy',
+      network: 'tcp,udp',
+    },
+  ]
 
   return {
     log: { loglevel: 'info' },
@@ -182,7 +154,7 @@ function generateConfig(proxyPassword: string, preProxyHost?: string, preProxyPo
     ],
     outbounds,
     routing: {
-      domainStrategy: 'AsIs',
+      domainStrategy: 'IPIfNonMatch',
       rules: routingRules,
     },
   }
@@ -216,7 +188,12 @@ export async function startSidecar(proxyPassword: string, preProxy?: string): Pr
     if (port === LOCAL_PORT) {
       return { ok: false, error: `Upstream proxy port ${port} conflicts with local proxy port` }
     }
-    config = generateConfig(proxyPassword, host, port)
+    const protocolProbe = await probePreProxy(host, port)
+    if (!protocolProbe.ok || !protocolProbe.protocol) {
+      return { ok: false, error: protocolProbe.error || `Cannot detect proxy protocol for ${proxy}` }
+    }
+    console.log(`[proxy] using upstream ${protocolProbe.protocol.toUpperCase()} proxy: ${proxy}`)
+    config = generateConfig(proxyPassword, host, port, protocolProbe.protocol)
   }
   const configDir = getConfigDir()
   const configPath = join(configDir, 'config.json')
@@ -396,8 +373,11 @@ export async function updateOutboundPassword(password: string): Promise<{ ok: bo
   try {
     const cfg = JSON.parse(readFileSync(configPath, 'utf-8'))
     const preProxyOut = cfg.outbounds?.find((o: { tag: string }) => o.tag === 'pre-proxy')
-    if (preProxyOut?.settings?.servers?.[0]) {
-      const s = preProxyOut.settings.servers[0]
+    const settings = preProxyOut?.settings
+    if (settings?.address && settings?.port) {
+      preProxy = `${settings.address}:${settings.port}`
+    } else if (settings?.servers?.[0]) {
+      const s = settings.servers[0]
       preProxy = `${s.address}:${s.port}`
     }
   } catch { /* use direct */ }
@@ -626,7 +606,14 @@ export function checkSystemProxy(): Promise<boolean> {
   })
 }
 
-export function probePreProxy(host: string, port: number): Promise<{ ok: boolean; latency?: number; error?: string }> {
+interface PreProxyProbeResult {
+  ok: boolean
+  latency?: number
+  protocol?: UpstreamProtocol
+  error?: string
+}
+
+function probeTcpEndpoint(host: string, port: number): Promise<{ ok: boolean; latency?: number; error?: string }> {
   const net = require('node:net') as typeof import('node:net')
   return new Promise((resolve) => {
     const start = Date.now()
@@ -640,6 +627,124 @@ export function probePreProxy(host: string, port: number): Promise<{ ok: boolean
   })
 }
 
+function probeHttpProxy(host: string, port: number): Promise<PreProxyProbeResult> {
+  const net = require('node:net') as typeof import('node:net')
+  return new Promise((resolve) => {
+    const start = Date.now()
+    let settled = false
+    let buf = ''
+    const done = (result: PreProxyProbeResult) => {
+      if (settled) return
+      settled = true
+      sock.destroy()
+      resolve(result)
+    }
+
+    const sock = net.createConnection({ host, port }, () => {
+      const req = [
+        'CONNECT api.ipify.org:443 HTTP/1.1',
+        'Host: api.ipify.org:443',
+        'Proxy-Connection: Keep-Alive',
+        '',
+        '',
+      ].join('\r\n')
+      sock.write(req)
+    })
+
+    sock.on('data', (chunk: Buffer) => {
+      buf += chunk.toString('latin1')
+      if (!buf.includes('\r\n')) return
+      const line = buf.split('\r\n', 1)[0] || ''
+      if (/^HTTP\/1\.[01] 200\b/i.test(line) || /^HTTP\/1\.[01] 407\b/i.test(line)) {
+        done({ ok: true, latency: Date.now() - start, protocol: 'http' })
+        return
+      }
+      done({ ok: false, error: `Unexpected HTTP proxy response: ${line || 'empty'}` })
+    })
+    sock.on('error', (err) => done({ ok: false, error: err.message }))
+    sock.setTimeout(5000, () => done({ ok: false, error: 'Timeout' }))
+  })
+}
+
+function probeSocksProxy(host: string, port: number): Promise<PreProxyProbeResult> {
+  const net = require('node:net') as typeof import('node:net')
+  return new Promise((resolve) => {
+    const start = Date.now()
+    let settled = false
+    const done = (result: PreProxyProbeResult) => {
+      if (settled) return
+      settled = true
+      sock.destroy()
+      resolve(result)
+    }
+
+    const sock = net.createConnection({ host, port }, () => {
+      sock.write(Buffer.from([0x05, 0x01, 0x00]))
+    })
+
+    sock.on('data', (chunk: Buffer) => {
+      if (chunk.length < 2) return
+      if (chunk[0] !== 0x05) {
+        done({ ok: false, error: 'Unexpected SOCKS proxy response' })
+        return
+      }
+      if (chunk[1] === 0x00 || chunk[1] === 0x02) {
+        done({ ok: true, latency: Date.now() - start, protocol: 'socks' })
+        return
+      }
+      done({ ok: false, error: `SOCKS auth method rejected: 0x${chunk[1].toString(16)}` })
+    })
+    sock.on('error', (err) => done({ ok: false, error: err.message }))
+    sock.setTimeout(5000, () => done({ ok: false, error: 'Timeout' }))
+  })
+}
+
+interface KnownPortInfo {
+  port: number
+  label: string
+  preferredProtocols: UpstreamProtocol[]
+}
+
+const KNOWN_PORTS: KnownPortInfo[] = [
+  { port: 7890, label: 'Clash', preferredProtocols: ['socks', 'http'] },
+  { port: 7897, label: 'Clash Verge', preferredProtocols: ['socks', 'http'] },
+  { port: 7891, label: 'Clash (SOCKS)', preferredProtocols: ['socks'] },
+  { port: 1087, label: 'ClashX', preferredProtocols: ['socks', 'http'] },
+  { port: 1080, label: 'V2RayN / Shadowsocks', preferredProtocols: ['socks'] },
+  { port: 10808, label: 'V2RayN (HTTP)', preferredProtocols: ['http'] },
+  { port: 10809, label: 'V2RayN', preferredProtocols: ['socks'] },
+  { port: 8888, label: 'Surge', preferredProtocols: ['http'] },
+  { port: 6152, label: 'Surge (Enhanced)', preferredProtocols: ['http'] },
+  { port: 20171, label: 'Qv2ray', preferredProtocols: ['socks'] },
+]
+
+function getPreferredProtocols(port: number): UpstreamProtocol[] {
+  const known = KNOWN_PORTS.find((item) => item.port === port)
+  return known ? known.preferredProtocols : ['socks', 'http']
+}
+
+export async function probePreProxy(host: string, port: number): Promise<PreProxyProbeResult> {
+  const attempts = getPreferredProtocols(port)
+  const errors: string[] = []
+
+  for (const protocol of attempts) {
+    const result = protocol === 'http'
+      ? await probeHttpProxy(host, port)
+      : await probeSocksProxy(host, port)
+    if (result.ok) return result
+    if (result.error) errors.push(`${protocol}: ${result.error}`)
+  }
+
+  const tcp = await probeTcpEndpoint(host, port)
+  if (!tcp.ok) return { ok: false, error: tcp.error }
+  return {
+    ok: false,
+    error: errors.length > 0
+      ? `Proxy port is open but did not behave like HTTP/SOCKS (${errors.join('; ')})`
+      : 'Proxy port is open but protocol detection failed',
+  }
+}
+
 // ── Port scanning for auto-detect ──
 
 interface PortScanResult {
@@ -647,6 +752,7 @@ interface PortScanResult {
   label: string
   ok: boolean
   latency?: number
+  protocol?: UpstreamProtocol
 }
 
 interface ScanResult {
@@ -654,30 +760,17 @@ interface ScanResult {
   direct: { ok: boolean; latency?: number }
 }
 
-const KNOWN_PORTS: { port: number; label: string }[] = [
-  { port: 7890, label: 'Clash' },
-  { port: 7897, label: 'Clash Verge' },
-  { port: 7891, label: 'Clash (SOCKS)' },
-  { port: 1087, label: 'ClashX' },
-  { port: 1080, label: 'V2RayN / Shadowsocks' },
-  { port: 10808, label: 'V2RayN (HTTP)' },
-  { port: 10809, label: 'V2RayN' },
-  { port: 8888, label: 'Surge' },
-  { port: 6152, label: 'Surge (Enhanced)' },
-  { port: 20171, label: 'Qv2ray' },
-]
-
 export async function scanLocalPorts(): Promise<ScanResult> {
   // Scan all known ports + VPS direct in parallel
   const probeResults = await Promise.all(
     KNOWN_PORTS.map(async ({ port, label }) => {
       const result = await probePreProxy('127.0.0.1', port)
-      return { port, label, ok: result.ok, latency: result.latency }
+      return { port, label, ok: result.ok, latency: result.latency, protocol: result.protocol }
     })
   )
 
   // Also probe VPS directly for the "direct" option
-  const directResult = await probePreProxy(REMOTE.address, REMOTE.port)
+  const directResult = await probeTcpEndpoint(REMOTE.address, REMOTE.port)
 
   return {
     proxies: probeResults,
