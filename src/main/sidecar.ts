@@ -573,6 +573,51 @@ export function probePreProxy(host: string, port: number): Promise<{ ok: boolean
   })
 }
 
+// ── Port scanning for auto-detect ──
+
+interface PortScanResult {
+  port: number
+  label: string
+  ok: boolean
+  latency?: number
+}
+
+interface ScanResult {
+  proxies: PortScanResult[]
+  direct: { ok: boolean; latency?: number }
+}
+
+const KNOWN_PORTS: { port: number; label: string }[] = [
+  { port: 7890, label: 'Clash' },
+  { port: 7897, label: 'Clash Verge' },
+  { port: 7891, label: 'Clash (SOCKS)' },
+  { port: 1087, label: 'ClashX' },
+  { port: 1080, label: 'V2RayN / Shadowsocks' },
+  { port: 10808, label: 'V2RayN (HTTP)' },
+  { port: 10809, label: 'V2RayN' },
+  { port: 8888, label: 'Surge' },
+  { port: 6152, label: 'Surge (Enhanced)' },
+  { port: 20171, label: 'Qv2ray' },
+]
+
+export async function scanLocalPorts(): Promise<ScanResult> {
+  // Scan all known ports + VPS direct in parallel
+  const probeResults = await Promise.all(
+    KNOWN_PORTS.map(async ({ port, label }) => {
+      const result = await probePreProxy('127.0.0.1', port)
+      return { port, label, ok: result.ok, latency: result.latency }
+    })
+  )
+
+  // Also probe VPS directly for the "direct" option
+  const directResult = await probePreProxy(REMOTE.address, REMOTE.port)
+
+  return {
+    proxies: probeResults,
+    direct: { ok: directResult.ok, latency: directResult.latency },
+  }
+}
+
 // ── Terminal proxy via shell env ──
 
 const PROXY_URL = `http://127.0.0.1:${LOCAL_PORT}`

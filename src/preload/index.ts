@@ -73,7 +73,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     status: () => ipcRenderer.invoke('sidecar:status'),
     verify: () => ipcRenderer.invoke('sidecar:verify'),
     proxyStatus: () => ipcRenderer.invoke('sidecar:proxy-status'),
-    probePreProxy: (host: string, port: number) => ipcRenderer.invoke('sidecar:probe-pre-proxy', host, port)
+    probePreProxy: (host: string, port: number) => ipcRenderer.invoke('sidecar:probe-pre-proxy', host, port),
+    scanPorts: () => ipcRenderer.invoke('sidecar:scan-ports')
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
