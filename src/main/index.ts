@@ -8,7 +8,7 @@ import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
 import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper } from './sidecar'
 
-const API_BASE = 'https://dev.originai.cc'
+const API_BASE = process.env.ORIGINAI_API_BASE || process.env.API_BASE || 'https://dev.originai.cc'
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
 if (!gotSingleInstanceLock) {
@@ -856,18 +856,16 @@ ipcMain.handle('payment:cancel-subscription', async (_e, claudeAccountId: string
 ipcMain.handle('telemetry:is-disabled', () => TELEMETRY_DISABLED)
 
 // Claude Account IPC handlers
-ipcMain.handle('claude-account:create', async () => {
-  return authFetch('POST', '/api/claude-account/create')
+ipcMain.handle('claude-account:create-self-service', async (_e, email?: string) => {
+  return authFetch('POST', '/api/claude-account/create-self-service', email ? { gmail: email } : {})
 })
 
 ipcMain.handle('claude-account:list', async () => {
   return authFetch('GET', '/api/claude-account/list')
 })
 
-ipcMain.handle('claude-account:listen-email', async (_e, email?: string) => {
-  const res = await authFetch('POST', '/api/claude-account/listen-email', email ? { email } : {})
-  console.log('[listen-email] status:', res.status, 'data:', JSON.stringify(res.data, null, 2))
-  return res
+ipcMain.handle('claude-account:complete-self-service-registration', async () => {
+  return authFetch('POST', '/api/claude-account/complete-self-service-registration')
 })
 
 // Ticket system IPC handlers

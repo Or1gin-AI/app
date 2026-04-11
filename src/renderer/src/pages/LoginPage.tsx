@@ -680,8 +680,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 />
                 <p className="text-[11px] text-text-faint mt-1.5 font-mono">
                   {t.login.futureAccount}
-                  <span className="text-text-secondary">{name || '···'}</span>
-                  @teams.originai.cc
                 </p>
                 {focused.name && name.length > 0 && (
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
