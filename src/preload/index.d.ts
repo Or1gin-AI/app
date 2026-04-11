@@ -68,6 +68,7 @@ declare global {
       }
       payment: {
         checkout: (productType: string, provider?: string, claudeAccountId?: string) => Promise<AuthResponse>
+        redeemCode: (code: string, claudeAccountId: string) => Promise<AuthResponse>
         openCheckout: (url: string) => Promise<{ ok: boolean }>
         onCheckoutClosed: (cb: () => void) => () => void
         orders: (page?: number, limit?: number) => Promise<AuthResponse>
