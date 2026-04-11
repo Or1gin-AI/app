@@ -632,6 +632,13 @@ ipcMain.handle('payment:checkout', async (_e, productType: string, provider?: st
   return authFetch('POST', '/api/payment/checkout', body)
 })
 
+ipcMain.handle('payment:redeem-code', async (_e, code: string, claudeAccountId: string) => {
+  return authFetch('POST', '/api/payment/redeem-code', {
+    code,
+    claude_account_id: claudeAccountId,
+  })
+})
+
 ipcMain.handle('payment:orders', async (_e, page?: number, limit?: number) => {
   const params = new URLSearchParams()
   if (page) params.set('page', String(page))
