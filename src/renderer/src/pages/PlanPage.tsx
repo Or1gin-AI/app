@@ -12,7 +12,7 @@ interface PlanPageProps {
   claudeAccountId: string
   networkOk: boolean
   onBack?: () => void
-  onRefresh: () => void
+  onRefresh: () => Promise<unknown>
 }
 
 const PLAN_PRICES: Record<PlanId, number> = {
@@ -48,6 +48,8 @@ type ModalState =
   | { step: 'confirm'; target: PlanId }
   | { step: 'override'; target: PlanId }
   | { step: 'payment'; target: PaymentTarget }
+  | { step: 'redeem' }
+  | { step: 'redeem-success'; productType: string; expireAt: string }
   | { step: 'waiting' }
   | { step: 'cancel-confirm' }
   | { step: 'activate-confirm' }
@@ -58,6 +60,8 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
   const { t } = useLocale()
   const [modal, setModal] = useState<ModalState>(null)
   const [checkoutLoading, setCheckoutLoading] = useState<'stripe' | 'crypto' | null>(null)
+  const [redeemCode, setRedeemCode] = useState('')
+  const [redeemLoading, setRedeemLoading] = useState(false)
   const [showTickets, setShowTickets] = useState(false)
   const cleanupRef = useRef<(() => void) | null>(null)
 
@@ -78,6 +82,15 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
   const handleBuyActivation = () => {
     setModal({ step: 'payment', target: 'activation' as PlanId })
   }
+
+  const handleOpenRedeemModal = useCallback(() => {
+    if (!claudeAccountId) {
+      setModal({ step: 'error', message: t.plan.redeemCodeMissingAccount })
+      return
+    }
+    setRedeemCode('')
+    setModal({ step: 'redeem' })
+  }, [claudeAccountId, t])
 
   // SMS activation — cooldown persists at component level (survives modal close/reopen)
   const smsPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -279,7 +292,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
     return () => {
       if (cleanupRef.current) cleanupRef.current()
     }
-  }, [onRefresh])
+  }, [onRefresh, refreshBalance])
 
   const currentIdx = PLAN_ORDER.indexOf(currentPlan)
 
@@ -354,6 +367,44 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
     [modal, claudeAccountId, t]
   )
 
+  const handleRedeemSubmit = useCallback(async () => {
+    if (!claudeAccountId) {
+      setModal({ step: 'error', message: t.plan.redeemCodeMissingAccount })
+      return
+    }
+
+    const code = redeemCode.trim()
+    if (!code) return
+
+    setRedeemLoading(true)
+    try {
+      const res = await window.electronAPI.payment.redeemCode(code, claudeAccountId)
+      if (res.status >= 200 && res.status < 300) {
+        const data = res.data as { productType?: string; expireAt?: string }
+        await onRefresh()
+        setRedeemCode('')
+        setModal({
+          step: 'redeem-success',
+          productType: data.productType || 'PRO',
+          expireAt: data.expireAt || new Date().toISOString(),
+        })
+      } else {
+        const errData = res.data as { message?: string } | undefined
+        setModal({
+          step: 'error',
+          message:
+            typeof errData === 'object' && errData?.message
+              ? errData.message
+              : t.plan.checkoutError,
+        })
+      }
+    } catch {
+      setModal({ step: 'error', message: t.plan.checkoutError })
+    } finally {
+      setRedeemLoading(false)
+    }
+  }, [claudeAccountId, onRefresh, redeemCode, t])
+
 
   const planLabel = (id: PlanId) => t.plan.plans[id]
 
@@ -425,7 +476,15 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
         </div>
 
         {/* Plan Cards */}
-        <h2 className="font-serif text-lg text-text mb-4">{t.plan.choosePlan}</h2>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="font-serif text-lg text-text">{t.plan.choosePlan}</h2>
+          <button
+            onClick={handleOpenRedeemModal}
+            className="text-[11px] px-3 py-1.5 rounded-lg border border-border-strong text-text-muted hover:text-brand hover:border-brand/40 cursor-pointer transition-colors bg-transparent"
+          >
+            {t.plan.redeemCodeButton}
+          </button>
+        </div>
         <div className="grid grid-cols-4 gap-3">
           {PLAN_ORDER.map((id) => {
             const isCurrent = id === currentPlan
@@ -647,6 +706,54 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, n
                   className="w-full py-2 rounded-lg text-sm text-text-muted cursor-pointer hover:text-text-secondary transition-colors disabled:opacity-50"
                 >
                   {t.plan.cancel}
+                </button>
+              </>
+            )}
+
+            {/* Redeem code */}
+            {modal.step === 'redeem' && (
+              <>
+                <h3 className="font-serif text-base text-text mb-2">{t.plan.redeemCodeTitle}</h3>
+                <p className="text-sm text-text-muted mb-5">{t.plan.redeemCodeDesc}</p>
+                <input
+                  value={redeemCode}
+                  onChange={(event) => setRedeemCode(event.target.value.toUpperCase())}
+                  placeholder={t.plan.redeemCodePlaceholder}
+                  className="w-full px-3 py-2.5 border border-border rounded-lg text-[13px] bg-bg-card text-text outline-none focus:border-brand transition-colors font-mono uppercase"
+                />
+                <div className="flex gap-3 mt-5">
+                  <button
+                    onClick={() => setModal(null)}
+                    disabled={redeemLoading}
+                    className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors disabled:opacity-50"
+                  >
+                    {t.plan.cancel}
+                  </button>
+                  <button
+                    onClick={handleRedeemSubmit}
+                    disabled={redeemLoading || !redeemCode.trim() || !claudeAccountId}
+                    className="flex-1 py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {redeemLoading ? t.plan.redeemCodeSubmitting : t.plan.redeemCodeSubmit}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Redeem success */}
+            {modal.step === 'redeem-success' && (
+              <>
+                <h3 className="font-serif text-base text-text mb-2">{t.plan.redeemCodeSuccessTitle}</h3>
+                <p className="text-sm text-text-muted mb-5">
+                  {t.plan.redeemCodeSuccessDesc
+                    .replace('{plan}', t.plan.productTypes[modal.productType] || modal.productType)
+                    .replace('{date}', modal.expireAt.split('T')[0])}
+                </p>
+                <button
+                  onClick={() => setModal(null)}
+                  className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                >
+                  {t.plan.ok}
                 </button>
               </>
             )}
