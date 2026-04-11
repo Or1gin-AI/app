@@ -72,11 +72,12 @@ declare global {
         openCheckout: (url: string) => Promise<{ ok: boolean }>
         onCheckoutClosed: (cb: () => void) => () => void
         orders: (page?: number, limit?: number) => Promise<AuthResponse>
+        cancelSubscription: (claudeAccountId: string) => Promise<AuthResponse>
       }
       claudeAccount: {
-        create: () => Promise<AuthResponse>
+        createSelfService: (email?: string) => Promise<AuthResponse>
+        completeSelfServiceRegistration: () => Promise<AuthResponse>
         list: () => Promise<AuthResponse>
-        listenEmail: (email?: string) => Promise<AuthResponse>
       }
       ticket: {
         list: (params: string) => Promise<AuthResponse>

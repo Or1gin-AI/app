@@ -82,6 +82,8 @@ function App(): React.JSX.Element {
   const [userPlan, setUserPlan] = useState<PlanId>('free')
   const [planExpires, setPlanExpires] = useState('')
   const [claudeAccountId, setClaudeAccountId] = useState('')
+  const [claudeAccountRegistered, setClaudeAccountRegistered] = useState(false)
+  const [claudeAccountMode, setClaudeAccountMode] = useState('')
   const [accountStatus, setAccountStatus] = useState('OK')
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [networkOk, setNetworkOk] = useState(true)
@@ -146,6 +148,27 @@ function App(): React.JSX.Element {
 
   // Fetch subscription status from claude-account/list — returns resolved plan
   const fetchSubscription = useCallback(async (): Promise<PlanId> => {
+    const applyAccounts = (accounts: Array<{
+      id: string
+      accountMode?: string
+      registered?: boolean
+      subscriptionType: string
+      expireAt: string
+      status: string
+      currentOrder: string | null
+    }>): PlanId => {
+      const selfServiceAccount = accounts.find((acct) => acct.accountMode === 'SELF_SERVICE_GMAIL') || null
+      const acct = selfServiceAccount || accounts[0]
+      setClaudeAccountId(selfServiceAccount?.id || acct?.id || '')
+      setClaudeAccountRegistered(Boolean(selfServiceAccount?.registered ?? acct?.registered))
+      setClaudeAccountMode(selfServiceAccount?.accountMode || acct?.accountMode || '')
+      setAccountStatus(selfServiceAccount?.status || acct?.status || 'UNREGISTERED')
+      const plan = PRODUCT_TO_PLAN[acct.subscriptionType] || 'free'
+      setUserPlan(plan)
+      setPlanExpires(acct.expireAt ? acct.expireAt.split('T')[0] : '')
+      return plan
+    }
+
     try {
       const res = await window.electronAPI.claudeAccount.list()
       if (res.status === 401 || res.status === 403) {
@@ -155,25 +178,31 @@ function App(): React.JSX.Element {
       if (res.status === 200) {
         const accounts = res.data as Array<{
           id: string
+          accountMode?: string
+          registered?: boolean
           subscriptionType: string
           expireAt: string
           status: string
           currentOrder: string | null
         }>
         if (accounts.length === 0) {
+          const createRes = await window.electronAPI.claudeAccount.createSelfService()
+          if (createRes.status >= 200 && createRes.status < 300) {
+            const retryRes = await window.electronAPI.claudeAccount.list()
+            if (retryRes.status === 200) {
+              const retryAccounts = retryRes.data as typeof accounts
+              if (retryAccounts.length > 0) return applyAccounts(retryAccounts)
+            }
+          }
           setClaudeAccountId('')
+          setClaudeAccountRegistered(false)
+          setClaudeAccountMode('')
           setAccountStatus('UNREGISTERED')
           setUserPlan('free')
           setPlanExpires('')
           return 'free'
         }
-        const acct = accounts[0]
-        setClaudeAccountId(acct.id)
-        setAccountStatus(acct.status || 'OK')
-        const plan = PRODUCT_TO_PLAN[acct.subscriptionType] || 'free'
-        setUserPlan(plan)
-        setPlanExpires(acct.expireAt ? acct.expireAt.split('T')[0] : '')
-        return plan
+        return applyAccounts(accounts)
       }
     } catch { /* */ }
     return userPlanRef.current
@@ -235,15 +264,8 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (page !== 'plan' || userPlan === 'free' || !planGateRef.current) return
     planGateRef.current = false
-    let cancelled = false
-    void (async () => {
-      const isNew = await fetchIsNewUser()
-      if (cancelled || !isNew) return
-      setShowOnboarding(true)
-      setPage('network')
-    })()
-    return () => { cancelled = true }
-  }, [page, userPlan, fetchIsNewUser])
+    void routeSubscribedUser()
+  }, [page, routeSubscribedUser, userPlan])
 
   // Health check: only for paid plans, not on login/loading
   const healthStarted = useRef(false)
@@ -329,6 +351,8 @@ function App(): React.JSX.Element {
     setUserPlan('free')
     setPlanExpires('')
     setClaudeAccountId('')
+    setClaudeAccountRegistered(false)
+    setClaudeAccountMode('')
     setAccountStatus('OK')
     setShowOnboarding(false)
     setNetworkOk(true)
@@ -399,7 +423,14 @@ function App(): React.JSX.Element {
           )}
           {page === 'main' && (
             <motion.div key="main" className="flex-1 flex flex-col min-h-0" {...pageTransition}>
-              <MainPage userName={userName} />
+              <MainPage
+                accountMode={claudeAccountMode}
+                registered={claudeAccountRegistered}
+                claudeAccountId={claudeAccountId}
+                hasPaidPlan={userPlan !== 'free'}
+                networkOk={networkOk}
+                onRefresh={fetchSubscription}
+              />
             </motion.div>
           )}
           {page === 'network-status' && (
@@ -415,7 +446,6 @@ function App(): React.JSX.Element {
               <PlanPage
                 currentPlan={userPlan}
                 expiresAt={planExpires}
-                userEmail={userEmail}
                 claudeAccountId={claudeAccountId}
                 accountStatus={accountStatus}
                 networkOk={networkOk}
