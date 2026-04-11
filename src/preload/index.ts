@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   payment: {
     checkout: (productType: string, provider?: string, claudeAccountId?: string) =>
       ipcRenderer.invoke('payment:checkout', productType, provider, claudeAccountId),
+    redeemCode: (code: string, claudeAccountId: string) =>
+      ipcRenderer.invoke('payment:redeem-code', code, claudeAccountId),
     openCheckout: (url: string) => ipcRenderer.invoke('payment:open-checkout', url),
     onCheckoutClosed: (cb: () => void) => {
       const handler = () => cb()
