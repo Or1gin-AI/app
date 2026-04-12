@@ -15,10 +15,10 @@ interface TitlebarProps {
 }
 
 const PLAN_LABELS: Record<PlanId, string> = {
-  free: 'Free Plan',
-  pro: 'Pro Plan',
-  '5x': '5x Plan',
-  '20x': '20x Plan',
+  free: 'Free',
+  standard: 'Standard',
+  pro: 'Pro',
+  enterprise: 'Enterprise',
 }
 
 export function Titlebar({
