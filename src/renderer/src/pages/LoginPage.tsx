@@ -37,10 +37,10 @@ function usePasswordChecks(password: string) {
   return useMemo(
     () => ({
       length: password.length >= 8,
-      upper: /[A-Z]/.test(password),
-      lower: /[a-z]/.test(password),
-      number: /\d/.test(password),
-      special: /[^A-Za-z0-9]/.test(password),
+      upper: true,
+      lower: true,
+      number: true,
+      special: true,
     }),
     [password],
   )
@@ -448,10 +448,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       const res = await window.electronAPI.auth.signUp(name, email, password, turnstileToken || undefined)
       if (res.status === 200) {
-        // Backend already sends OTP on sign-up, no need to call sendOtp again
         setMessage(t.login.registerSuccess)
+        // sendOnSignUp is false on backend, so we must send OTP explicitly
+        // Use current token before clearing — backend requires Turnstile for send-verification-otp
+        window.electronAPI.auth.sendOtp(email, 'email-verification', turnstileToken || undefined).then(() => setOtpSent(true))
         setTurnstileToken(null)
-        setOtpSent(true) // backend already sent OTP on sign-up
         setView('otp')
       } else {
         const data = res.data as { message?: string }
@@ -723,13 +724,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   placeholder="••••••••"
                   className={inputCls(dirty.password && !allPwdOk && password.length > 0)}
                 />
-                {focused.password && password.length > 0 && (
+                {focused.password && password.length > 0 && !pwdChecks.length && (
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
                     <Check ok={pwdChecks.length} label={t.login.validPwdLength} />
-                    <Check ok={pwdChecks.upper} label={t.login.validPwdUpper} />
-                    <Check ok={pwdChecks.lower} label={t.login.validPwdLower} />
-                    <Check ok={pwdChecks.number} label={t.login.validPwdNumber} />
-                    <Check ok={pwdChecks.special} label={t.login.validPwdSpecial} />
                   </div>
                 )}
               </div>
@@ -855,13 +852,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   placeholder="••••••••"
                   className={inputCls(dirty.newPwd && !allNewPwdOk && newPassword.length > 0)}
                 />
-                {focused.newPwd && newPassword.length > 0 && (
+                {focused.newPwd && newPassword.length > 0 && !newPwdChecks.length && (
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
                     <Check ok={newPwdChecks.length} label={t.login.validPwdLength} />
-                    <Check ok={newPwdChecks.upper} label={t.login.validPwdUpper} />
-                    <Check ok={newPwdChecks.lower} label={t.login.validPwdLower} />
-                    <Check ok={newPwdChecks.number} label={t.login.validPwdNumber} />
-                    <Check ok={newPwdChecks.special} label={t.login.validPwdSpecial} />
                   </div>
                 )}
               </div>

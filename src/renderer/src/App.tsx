@@ -15,7 +15,7 @@ import type { PlanId } from '@/pages/PlanPage'
 
 type Page = 'loading' | 'login' | 'network' | 'network-status' | 'main' | 'plan'
 
-const PRODUCT_TO_PLAN: Record<string, PlanId> = { FREE: 'free', PRO: 'pro', X5: '5x', X20: '20x' }
+const PRODUCT_TO_PLAN: Record<string, PlanId> = { FREE: 'free', STANDARD: 'standard', PRO: 'pro', ENTERPRISE: 'enterprise' }
 
 const pageTransition = {
   initial: { opacity: 0 },
@@ -90,7 +90,7 @@ function App(): React.JSX.Element {
   const [exitIp, setExitIp] = useState<string | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
   const userPlanRef = useRef<PlanId>('free')
-  const planGateRef = useRef(false)
+  const prevPlanRef = useRef<PlanId>('free')
   const subscriptionRoutingRef = useRef(false)
 
   // Auto-update state
@@ -225,10 +225,9 @@ function App(): React.JSX.Element {
         window.electronAPI.session.startCheck()
         const plan = await fetchSubscription()
         if (plan === 'free') {
-          planGateRef.current = true
           setPage('plan')
         } else {
-          planGateRef.current = false
+          prevPlanRef.current = plan
           await routeSubscribedUser()
         }
       } else {
@@ -251,7 +250,6 @@ function App(): React.JSX.Element {
     if (page === 'loading' || page === 'login' || page === 'plan') return
     // Priority 1: Free plan — can only access plan page
     if (userPlan === 'free') {
-      planGateRef.current = true
       setPage('plan')
       return
     }
@@ -261,11 +259,14 @@ function App(): React.JSX.Element {
     }
   }, [page, userPlan, networkOk])
 
+  // Detect plan transition from free → paid while on plan page → navigate to onboarding/network
   useEffect(() => {
-    if (page !== 'plan' || userPlan === 'free' || !planGateRef.current) return
-    planGateRef.current = false
-    void routeSubscribedUser()
-  }, [page, routeSubscribedUser, userPlan])
+    const wasFree = prevPlanRef.current === 'free'
+    prevPlanRef.current = userPlan
+    if (wasFree && userPlan !== 'free' && page === 'plan') {
+      void routeSubscribedUser()
+    }
+  }, [userPlan, page, routeSubscribedUser])
 
   // Health check: only for paid plans, not on login/loading
   const healthStarted = useRef(false)
@@ -309,10 +310,9 @@ function App(): React.JSX.Element {
     window.electronAPI.session.startCheck()
     const plan = await fetchSubscription()
     if (plan === 'free') {
-      planGateRef.current = true
       setPage('plan')
     } else {
-      planGateRef.current = false
+      prevPlanRef.current = plan
       await routeSubscribedUser()
     }
   }, [fetchSubscription, posthog, routeSubscribedUser])
@@ -357,14 +357,13 @@ function App(): React.JSX.Element {
     setShowOnboarding(false)
     setNetworkOk(true)
     setExitIp(null)
-    planGateRef.current = false
+    prevPlanRef.current = 'free'
     subscriptionRoutingRef.current = false
     setPage('login')
   }, [])
   logoutRef.current = handleLogout
 
   const handlePlanClick = useCallback(() => {
-    planGateRef.current = false
     void fetchSubscription()
     setPage('plan')
   }, [fetchSubscription])
@@ -446,6 +445,7 @@ function App(): React.JSX.Element {
               <PlanPage
                 currentPlan={userPlan}
                 expiresAt={planExpires}
+                userEmail={userEmail}
                 claudeAccountId={claudeAccountId}
                 accountStatus={accountStatus}
                 networkOk={networkOk}
