@@ -238,38 +238,24 @@ export function SmsActivationCard({
 
   return (
     <>
-      <div className="w-[228px] rounded-2xl border border-border bg-bg-card/95 p-4 shadow-[0_12px_36px_rgba(15,23,42,0.08)] backdrop-blur-sm">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-faint">
-              {t.plan.activationSectionTitle}
-            </p>
-            <p className="mt-2 text-[13px] leading-5 text-text-muted">
-              {t.plan.activationActivate}
-            </p>
-          </div>
-          <div className="min-w-[64px] rounded-xl border border-border bg-bg px-3 py-2 text-right">
-            <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-text-faint">
-              {t.plan.activationRemaining}
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-text">
-              {activationBalance ?? '—'}
-            </p>
-          </div>
-        </div>
-
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-card/95 px-4 py-2.5 shadow-sm backdrop-blur-sm">
+        <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-text-faint">
+          {t.plan.activationSectionTitle}
+        </span>
+        <span className="text-sm font-semibold text-text font-mono">
+          {activationBalance ?? '—'}
+        </span>
         <button
           onClick={handleActivateEntry}
           disabled={!hasAccount || !activationBalance || activationBalance <= 0}
-          className="w-full rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t.plan.activationActivate}
         </button>
-
         {notice && (
-          <p className={`mt-3 text-[11px] leading-5 ${notice.type === 'error' ? 'text-red-500' : 'text-green-600'}`}>
+          <span className={`text-[11px] ${notice.type === 'error' ? 'text-red-500' : 'text-green-600'}`}>
             {notice.message}
-          </p>
+          </span>
         )}
       </div>
 
