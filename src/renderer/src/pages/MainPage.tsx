@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useLocale } from '@/i18n/context'
-import { track, EVENTS } from '@/lib/telemetry'
 import { SmsActivationCard } from '@/components/SmsActivationCard'
 
 interface MainPageProps {
@@ -12,46 +12,16 @@ interface MainPageProps {
   onRefresh: () => Promise<unknown>
 }
 
-type Notice = { type: 'success' | 'error'; message: string } | null
+const tabTransition = {
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6 },
+  transition: { duration: 0.2 },
+}
 
-const SELF_SERVICE_MODE = 'SELF_SERVICE_GMAIL'
-
-export function MainPage({ accountMode, registered, claudeAccountId, hasPaidPlan, networkOk, onRefresh }: MainPageProps) {
+export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPageProps) {
   const { t } = useLocale()
-  const [notice, setNotice] = useState<Notice>(null)
-  const [completeLoading, setCompleteLoading] = useState(false)
-
-  const canCompleteRegistration = accountMode === SELF_SERVICE_MODE
-
-  const handleOpenClaude = useCallback(() => {
-    window.open('https://claude.ai', '_blank')
-  }, [])
-
-  const handleCompleteRegistration = useCallback(async () => {
-    if (!canCompleteRegistration || registered) return
-
-    setCompleteLoading(true)
-    setNotice(null)
-    try {
-      const res = await window.electronAPI.claudeAccount.completeSelfServiceRegistration()
-      if (res.status >= 200 && res.status < 300) {
-        track(EVENTS.USER_REGISTERED)
-        await onRefresh()
-        setNotice({ type: 'success', message: t.main.claudeWeb.completeRegistrationSuccess })
-        return
-      }
-
-      const errData = res.data as { message?: string } | undefined
-      setNotice({
-        type: 'error',
-        message: typeof errData === 'object' && errData?.message ? errData.message : t.main.claudeWeb.completeRegistrationError,
-      })
-    } catch {
-      setNotice({ type: 'error', message: t.main.claudeWeb.completeRegistrationError })
-    } finally {
-      setCompleteLoading(false)
-    }
-  }, [canCompleteRegistration, onRefresh, registered, t])
+  const [activeTab, setActiveTab] = useState<'web' | 'code'>('web')
 
   const webSteps = [
     <>{t.main.claudeWeb.step1}</>,
@@ -60,9 +30,40 @@ export function MainPage({ accountMode, registered, claudeAccountId, hasPaidPlan
     <>{t.main.claudeWeb.step4}</>,
   ]
 
+  const codeSteps = [
+    <>{t.main.claudeCode.step1} <code className="bg-bg-alt px-1.5 py-0.5 rounded text-xs text-brand">claude login</code></>,
+    <>{t.main.claudeCode.step2} <code className="bg-bg-alt px-1.5 py-0.5 rounded text-xs text-brand">{t.main.claudeCode.step2method}</code> {t.main.claudeCode.step2suffix}</>,
+    <>{t.main.claudeCode.step3}</>,
+    <>{t.main.claudeCode.step4}</>,
+  ]
+
   return (
-    <div className="relative flex flex-1 min-h-0 items-center overflow-y-auto">
-      <div className="absolute right-8 top-8 z-10">
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Tab bar */}
+      <div className="flex items-center justify-between px-8 pt-5 pb-2">
+        <div className="flex items-center gap-1 rounded-lg bg-bg-alt p-1">
+          <button
+            onClick={() => setActiveTab('web')}
+            className={`px-4 py-1.5 rounded-md text-[13px] font-medium transition-all cursor-pointer ${
+              activeTab === 'web'
+                ? 'bg-bg-card text-text shadow-sm'
+                : 'text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            {t.main.claudeWeb.title}
+          </button>
+          <button
+            onClick={() => setActiveTab('code')}
+            className={`px-4 py-1.5 rounded-md text-[13px] font-medium transition-all cursor-pointer ${
+              activeTab === 'code'
+                ? 'bg-bg-card text-text shadow-sm'
+                : 'text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            {t.main.claudeCode.title}
+          </button>
+        </div>
+
         <SmsActivationCard
           claudeAccountId={claudeAccountId}
           hasPaidPlan={hasPaidPlan}
@@ -70,106 +71,63 @@ export function MainPage({ accountMode, registered, claudeAccountId, hasPaidPlan
         />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center p-10 border-r border-border">
-        <div className="max-w-[320px] w-full">
-          <div className="text-center">
-            <div className="font-mono text-[11px] text-text-faint tracking-[2px] uppercase mb-3">
-              {t.main.claudeWeb.label}
-            </div>
-            <h2 className="font-serif text-lg text-text mb-2">{t.main.claudeWeb.title}</h2>
-            <p className="text-[13px] text-text-muted mb-6 leading-relaxed">
-              {t.main.claudeWeb.desc}
-              <br />
-              {t.main.claudeWeb.descLine2}
-            </p>
-          </div>
-
-          <div className="text-[13px] text-text-secondary leading-relaxed mb-6">
-            {webSteps.map((content, index) => (
-              <div key={index} className="flex gap-2.5 mb-3.5 items-start">
-                <div className="min-w-[22px] h-[22px] rounded-full bg-bg-alt text-brand flex items-center justify-center text-[11px] font-semibold font-mono shrink-0">
-                  {index + 1}
+      {/* Content area */}
+      <div className="flex-1 flex items-center justify-center overflow-y-auto px-8">
+        <AnimatePresence mode="wait">
+          {activeTab === 'web' ? (
+            <motion.div key="web" {...tabTransition} className="max-w-[420px] w-full">
+              {/* Header */}
+              <div className="text-center mb-8">
+                <div className="font-mono text-[11px] text-text-faint tracking-[2px] uppercase mb-2">
+                  {t.main.claudeWeb.label}
                 </div>
-                <div>{content}</div>
+                <h2 className="font-serif text-xl text-text mb-2">{t.main.claudeWeb.title}</h2>
+                <p className="text-[13px] text-text-muted leading-relaxed">
+                  {t.main.claudeWeb.desc} {t.main.claudeWeb.descLine2}
+                </p>
               </div>
-            ))}
-          </div>
 
-          <div className="rounded-xl border border-border bg-bg-card p-4 mb-5">
-            <p className="text-xs font-mono text-text-faint mb-2">{t.main.claudeWeb.statusLabel}</p>
-            <p className={`text-sm font-medium mb-2 ${registered ? 'text-green-600' : 'text-amber-600'}`}>
-              {registered ? t.main.claudeWeb.statusDone : t.main.claudeWeb.statusPending}
-            </p>
-            <p className="text-xs text-text-muted leading-5">
-              {registered ? t.main.claudeWeb.statusHintDone : t.main.claudeWeb.statusHintPending}
-            </p>
-          </div>
+              {/* Steps */}
+              <div className="text-[13px] text-text-secondary leading-relaxed mb-6 space-y-2.5">
+                {webSteps.map((content, i) => (
+                  <div key={i} className="flex gap-2 items-start">
+                    <span className="text-brand font-mono text-[12px] mt-[1px] shrink-0">{i + 1}.</span>
+                    <span>{content}</span>
+                  </div>
+                ))}
+              </div>
 
-          {notice && (
-            <div
-              className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
-                notice.type === 'success'
-                  ? 'border-green-200 bg-green-50 text-green-700'
-                  : 'border-red-200 bg-red-50 text-red-700'
-              }`}
-            >
-              {notice.message}
-            </div>
+            </motion.div>
+          ) : (
+            <motion.div key="code" {...tabTransition} className="max-w-[420px] w-full">
+              {/* Header */}
+              <div className="text-center mb-8">
+                <div className="font-mono text-[11px] text-text-faint tracking-[2px] uppercase mb-2">
+                  {t.main.claudeCode.label}
+                </div>
+                <h2 className="font-serif text-xl text-text mb-2">{t.main.claudeCode.title}</h2>
+                <p className="text-[13px] text-text-muted leading-relaxed">
+                  {t.main.claudeCode.desc} {t.main.claudeCode.descLine2}
+                </p>
+              </div>
+
+              {/* Terminal warning */}
+              <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-2.5 mb-6">
+                <p className="text-[12px] text-red-500 leading-relaxed">{t.main.claudeCode.newTerminalWarning}</p>
+              </div>
+
+              {/* Steps */}
+              <div className="text-[13px] text-text-secondary leading-relaxed space-y-2.5">
+                {codeSteps.map((content, i) => (
+                  <div key={i} className="flex gap-2 items-start">
+                    <span className="text-brand font-mono text-[12px] mt-[1px] shrink-0">{i + 1}.</span>
+                    <span>{content}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
           )}
-
-          <div className="text-center">
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={handleOpenClaude}
-                className="w-full py-2.5 rounded-lg text-sm font-medium bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
-              >
-                {t.main.claudeWeb.openClaude}
-              </button>
-              <button
-                onClick={handleCompleteRegistration}
-                disabled={!canCompleteRegistration || registered || completeLoading}
-                className="w-full py-2.5 rounded-lg text-sm font-medium border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {completeLoading ? t.main.claudeWeb.completingRegistration : registered ? t.main.claudeWeb.statusDone : t.main.claudeWeb.completeRegistration}
-              </button>
-            </div>
-            <p className="text-xs text-text-faint mt-3 leading-5">{t.main.claudeWeb.supportNote}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col items-center justify-center p-10">
-        <div className="max-w-[280px] w-full">
-          <div className="text-center">
-            <div className="font-mono text-[11px] text-text-faint tracking-[2px] uppercase mb-3">
-              {t.main.claudeCode.label}
-            </div>
-            <h2 className="font-serif text-lg text-text mb-2">{t.main.claudeCode.title}</h2>
-            <p className="text-[13px] text-text-muted mb-6 leading-relaxed">
-              {t.main.claudeCode.desc}
-              <br />
-              {t.main.claudeCode.descLine2}
-            </p>
-          </div>
-
-          <p className="text-[12px] text-red-500 mb-4 leading-relaxed">{t.main.claudeCode.newTerminalWarning}</p>
-
-          <div className="text-[13px] text-text-secondary leading-relaxed">
-            {[
-              <>{t.main.claudeCode.step1} <code className="bg-bg-alt px-1.5 py-0.5 rounded text-xs text-brand">claude login</code></>,
-              <>{t.main.claudeCode.step2} <code className="bg-bg-alt px-1.5 py-0.5 rounded text-xs text-brand">{t.main.claudeCode.step2method}</code> {t.main.claudeCode.step2suffix}</>,
-              <>{t.main.claudeCode.step3}</>,
-              <>{t.main.claudeCode.step4}</>,
-            ].map((content, index) => (
-              <div key={index} className="flex gap-2.5 mb-3.5 items-start">
-                <div className="min-w-[22px] h-[22px] rounded-full bg-bg-alt text-brand flex items-center justify-center text-[11px] font-semibold font-mono shrink-0">
-                  {index + 1}
-                </div>
-                <div>{content}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        </AnimatePresence>
       </div>
     </div>
   )
