@@ -334,6 +334,8 @@ export const zh = {
     downloading: '正在下载更新 v{version}...',
     ready: '更新 v{version} 已就绪',
     readyDesc: '新版本已下载完成，需要重启应用以完成更新。',
+    installing: '正在重启并安装更新...',
+    installingDesc: '应用会自动关闭并重新打开，请稍候。',
     restart: '立即重启',
   },
   onboarding: {
