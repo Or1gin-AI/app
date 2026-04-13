@@ -28,7 +28,7 @@ const PLAN_TO_PRODUCT: Record<PlanId, string> = {
   enterprise: 'ENTERPRISE',
 }
 
-const PLAN_ORDER: PlanId[] = ['standard', 'pro', 'enterprise']
+const PLAN_ORDER: PlanId[] = ['standard']
 
 const PLAN_FEATURES: Record<Exclude<PlanId, 'free'>, { ipKey: string; ipDescKey: string; activations: number; devices: number }> = {
   standard: { ipKey: 'ipApartment', ipDescKey: 'ipApartmentDesc', activations: 1, devices: 1 },
@@ -488,7 +488,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
             </button>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="flex justify-center">
           {PLAN_ORDER.map((id) => {
             const isCurrent = id === currentPlan
             const price = PLAN_PRICES[id]
@@ -505,14 +505,16 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
             return (
               <div
                 key={id}
-                className={`rounded-xl border p-4 flex flex-col transition-colors ${
+                className={`rounded-xl border p-4 flex flex-col transition-colors max-w-xs w-full ${
                   isCurrent ? 'border-brand bg-brand/[0.04]' : 'border-border bg-bg-card hover:border-brand/40'
                 }`}
               >
                 <p className="text-xs font-mono text-text-faint mb-1 text-center">{planLabel(id)}</p>
-                <p className="text-2xl font-semibold text-text text-center mb-0.5">
-                  {CURRENCY}{price}
-                </p>
+                <div className="flex items-center justify-center gap-2 mb-0.5">
+                  <span className="text-sm text-text-faint line-through">{CURRENCY}10</span>
+                  <span className="text-2xl font-semibold text-text">{CURRENCY}{price}</span>
+                  <span className="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded-full font-medium">-50%</span>
+                </div>
                 <p className="text-[10px] text-text-faint text-center mb-3">{t.plan.serviceFee}</p>
 
                 {/* Features */}
