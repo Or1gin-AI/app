@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, nativeImage, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, nativeImage, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
@@ -223,6 +223,31 @@ function createWindow(): void {
       })
     }
   )
+
+  mainWindow.on('close', (e) => {
+    // Auto-update install is already confirmed by the user — don't block it
+    if (updaterInstallInProgress) return
+    // Only warn when the proxy is actively running
+    if (!isSidecarRunning()) return
+
+    e.preventDefault()
+    const isChinese = app.getLocale().startsWith('zh')
+    dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: [isChinese ? '退出' : 'Quit', isChinese ? '取消' : 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'OriginAI',
+      message: isChinese ? '代理仍在运行' : 'Proxy is still running',
+      detail: isChinese
+        ? '请先断开代理连接再退出，否则系统代理设置可能残留。'
+        : 'Please disconnect the proxy before quitting to avoid leftover system proxy settings.',
+    }).then(({ response }) => {
+      if (response === 0) {
+        mainWindow.destroy()
+      }
+    })
+  })
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
@@ -1133,13 +1158,51 @@ function broadcast(channel: string, data: unknown): void {
   }
 }
 
-ipcMain.handle('updater:install', async () => {
-  // Clean up proxy before restarting — before-quit may not complete during quitAndInstall
+let updaterInstallInProgress = false
+
+async function runUpdaterInstallCleanup(): Promise<void> {
   stopProxyMonitor()
+  // Clear shell env synchronously first so a partial quit still restores the terminal.
   clearShellProxy()
-  await clearSystemProxy().catch(() => {})
-  await stopSidecar()
-  autoUpdater.quitAndInstall(false, true)
+
+  const cleanupSteps: Array<[string, Promise<unknown>]> = [
+    ['clear system proxy', withTimeout(clearSystemProxy(), 4_000, 'clear system proxy')],
+    ['stop sidecar', withTimeout(stopSidecar(), 4_000, 'stop sidecar')],
+  ]
+
+  const results = await Promise.allSettled(cleanupSteps.map(([, promise]) => promise))
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.warn(`[updater] ${cleanupSteps[index][0]} failed:`, result.reason)
+    }
+  })
+}
+
+ipcMain.handle('updater:install', async () => {
+  if (updaterInstallInProgress) return { ok: true }
+
+  updaterInstallInProgress = true
+  broadcast('updater:status', { status: 'installing' })
+  console.log('[updater] install requested')
+
+  await runUpdaterInstallCleanup()
+
+  // Allow the relaunched instance to start even if the old process is still closing.
+  app.releaseSingleInstanceLock()
+  console.log('[updater] cleanup finished, calling quitAndInstall')
+
+  setImmediate(() => {
+    try {
+      autoUpdater.quitAndInstall(false, true)
+    } catch (err) {
+      updaterInstallInProgress = false
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[updater] quitAndInstall failed:', message)
+      broadcast('updater:status', { status: 'error', message })
+    }
+  })
+
+  return { ok: true }
 })
 
 ipcMain.handle('updater:check', () => {

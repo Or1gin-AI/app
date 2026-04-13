@@ -334,6 +334,8 @@ export const en = {
     downloading: 'Downloading update v{version}...',
     ready: 'Update v{version} Ready',
     readyDesc: 'A new version has been downloaded. The app must restart to apply the update.',
+    installing: 'Restarting and installing update...',
+    installingDesc: 'The app will close and reopen automatically. Please wait.',
     restart: 'Restart Now',
   },
   onboarding: {

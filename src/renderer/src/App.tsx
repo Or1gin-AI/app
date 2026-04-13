@@ -27,6 +27,7 @@ const pageTransition = {
 function UpdateOverlay({ status, version, percent }: { status: string; version: string; percent: number }): React.JSX.Element {
   const { t } = useLocale()
   const isReady = status === 'downloaded'
+  const isInstalling = status === 'installing'
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -48,6 +49,17 @@ function UpdateOverlay({ status, version, percent }: { status: string; version: 
             >
               {t.updater.restart}
             </button>
+          </>
+        ) : isInstalling ? (
+          <>
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">
+              <svg className="w-6 h-6 text-blue-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t.updater.installing}</h3>
+            <p className="text-sm text-gray-500">{t.updater.installingDesc}</p>
           </>
         ) : (
           <>
@@ -102,9 +114,11 @@ function App(): React.JSX.Element {
   const updateLockedRef = useRef(false)
   useEffect(() => {
     const cleanup = window.electronAPI.updater.onStatus((data) => {
-      // Once downloaded, lock the overlay — don't let hourly re-checks dismiss it
-      if (updateLockedRef.current) return
-      if (data.status === 'downloaded') updateLockedRef.current = true
+      // Once downloaded, keep the overlay visible across background re-checks,
+      // but still allow install / error transitions to come through.
+      if (updateLockedRef.current && !['downloaded', 'installing', 'error'].includes(data.status)) return
+      if (data.status === 'downloaded' || data.status === 'installing') updateLockedRef.current = true
+      if (data.status === 'error') updateLockedRef.current = false
       setUpdateStatus(data.status)
       if (data.version) setUpdateVersion(data.version)
       if (data.percent !== undefined) setUpdatePercent(data.percent)
@@ -140,7 +154,10 @@ function App(): React.JSX.Element {
     try {
       const isNew = await fetchIsNewUser()
       if (isNew) setShowOnboarding(true)
-      setPage('network')
+      // If sidecar is already running (e.g. window was closed and reopened on macOS),
+      // go straight to the main page instead of the network setup page.
+      const status = await window.electronAPI.sidecar.status()
+      setPage(status.running ? 'main' : 'network')
     } finally {
       subscriptionRoutingRef.current = false
     }
@@ -386,7 +403,10 @@ function App(): React.JSX.Element {
     }
   }, [userPlan])
 
-  const showUpdateOverlay = updateStatus === 'downloading' || updateStatus === 'downloaded'
+  const showUpdateOverlay =
+    updateStatus === 'downloading' ||
+    updateStatus === 'downloaded' ||
+    updateStatus === 'installing'
 
   return (
     <LocaleProvider>
