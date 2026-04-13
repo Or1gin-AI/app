@@ -231,6 +231,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [otp, setOtp] = useState('')
   const [otpSent, setOtpSent] = useState(false)
+  const [pendingInitialOtpAutoSend, setPendingInitialOtpAutoSend] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
 
@@ -449,9 +450,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       const res = await window.electronAPI.auth.signUp(name, email, password, turnstileToken || undefined)
       if (res.status === 200) {
         setMessage(t.login.registerSuccess)
-        // sendOnSignUp is false on backend, so we must send OTP explicitly
-        // Use current token before clearing — backend requires Turnstile for send-verification-otp
-        window.electronAPI.auth.sendOtp(email, 'email-verification', turnstileToken || undefined).then(() => setOtpSent(true))
+        setOtp('')
+        setOtpSent(false)
+        // The registration request has already consumed the current Turnstile token.
+        // Wait for the OTP page to mount a fresh widget before sending the first code.
+        setPendingInitialOtpAutoSend(true)
         setTurnstileToken(null)
         setView('otp')
       } else {
@@ -513,8 +516,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         const errData = res.data as { message?: string } | undefined
         setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorOtpFailed)
       } else {
-        setMessage(t.login.otpResent)
+        setMessage(t.login.otpSent)
         setOtpSent(true)
+        setPendingInitialOtpAutoSend(false)
         setTurnstileToken(null) // reset for verify step
       }
     } catch {
@@ -524,11 +528,18 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
   }
 
+  useEffect(() => {
+    if (view !== 'otp' || otpSent || !pendingInitialOtpAutoSend || !turnstileToken || loading) return
+    setPendingInitialOtpAutoSend(false)
+    void handleSendInitialOtp()
+  }, [view, otpSent, pendingInitialOtpAutoSend, turnstileToken, loading, handleSendInitialOtp])
+
   const switchToRegister = () => {
     clearMessages()
     setFocused({})
     setDirty({})
     setTurnstileToken(null)
+    setPendingInitialOtpAutoSend(false)
     setView('register')
   }
 
@@ -537,6 +548,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setFocused({})
     setDirty({})
     setTurnstileToken(null)
+    setPendingInitialOtpAutoSend(false)
     setView('login')
   }
 
