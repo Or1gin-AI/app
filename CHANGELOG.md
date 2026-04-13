@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.6 - 2026-04-13
+
+### 中文
+
+- 修复注册后首次邮箱验证码偶发收不到的问题。注册成功后不再复用已被 `signUp` 消耗的 Turnstile token，而是等验证页拿到新的 token 后再自动发送第一封验证码。
+- 调整验证码提示文案。只有真正发送成功后才显示“验证码已发送”，避免首发失败时误导用户去邮箱里查找。
+
+### English
+
+- Fixed the intermittent issue where the first email verification code after sign-up was not delivered. The app no longer reuses the Turnstile token consumed by `signUp`; it now waits for a fresh token on the OTP screen before sending the initial code.
+- Updated OTP messaging so the UI only reports success after the first verification email has actually been sent, avoiding misleading prompts when the initial send fails.
+
 ## v0.2.1 - 2026-04-10
 
 ### 中文
