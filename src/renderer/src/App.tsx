@@ -24,10 +24,11 @@ const pageTransition = {
   transition: { duration: 0.35 },
 }
 
-function UpdateOverlay({ status, version, percent }: { status: string; version: string; percent: number }): React.JSX.Element {
+function UpdateOverlay({ status, version, percent, errorMessage }: { status: string; version: string; percent: number; errorMessage: string }): React.JSX.Element {
   const { t } = useLocale()
   const isReady = status === 'downloaded'
   const isInstalling = status === 'installing'
+  const isError = status === 'error'
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -60,6 +61,23 @@ function UpdateOverlay({ status, version, percent }: { status: string; version: 
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">{t.updater.installing}</h3>
             <p className="text-sm text-gray-500">{t.updater.installingDesc}</p>
+          </>
+        ) : isError ? (
+          <>
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
+              <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t.updater.errorTitle}</h3>
+            <p className="text-sm text-gray-500 mb-1">{t.updater.errorDesc}</p>
+            {errorMessage && <p className="text-xs text-gray-400 mb-5 break-all">{errorMessage}</p>}
+            <button
+              onClick={() => window.electronAPI.updater.check()}
+              className="w-full py-2.5 rounded-lg bg-brand text-white font-medium hover:opacity-90 transition-opacity"
+            >
+              {t.updater.retry}
+            </button>
           </>
         ) : (
           <>
@@ -109,6 +127,7 @@ function App(): React.JSX.Element {
   const [updateStatus, setUpdateStatus] = useState<string>('')
   const [updateVersion, setUpdateVersion] = useState<string>('')
   const [updatePercent, setUpdatePercent] = useState<number>(0)
+  const [updateError, setUpdateError] = useState<string>('')
 
   // Listen for auto-update events
   const updateLockedRef = useRef(false)
@@ -122,6 +141,7 @@ function App(): React.JSX.Element {
       setUpdateStatus(data.status)
       if (data.version) setUpdateVersion(data.version)
       if (data.percent !== undefined) setUpdatePercent(data.percent)
+      if (data.message) setUpdateError(data.message)
     })
     return cleanup
   }, [])
@@ -406,12 +426,13 @@ function App(): React.JSX.Element {
   const showUpdateOverlay =
     updateStatus === 'downloading' ||
     updateStatus === 'downloaded' ||
-    updateStatus === 'installing'
+    updateStatus === 'installing' ||
+    updateStatus === 'error'
 
   return (
     <LocaleProvider>
       <div className="h-full flex flex-col bg-bg">
-        {showUpdateOverlay && <UpdateOverlay status={updateStatus} version={updateVersion} percent={updatePercent} />}
+        {showUpdateOverlay && <UpdateOverlay status={updateStatus} version={updateVersion} percent={updatePercent} errorMessage={updateError} />}
         <Titlebar
           showAccount={page !== 'login' && page !== 'loading'}
           showIndicator={userPlan !== 'free' && (page === 'main' || page === 'plan' || page === 'network-status')}

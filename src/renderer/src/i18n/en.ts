@@ -337,6 +337,9 @@ export const en = {
     installing: 'Restarting and installing update...',
     installingDesc: 'The app will close and reopen automatically. Please wait.',
     restart: 'Restart Now',
+    errorTitle: 'Update Failed',
+    errorDesc: 'The update could not be completed. Please try again.',
+    retry: 'Retry',
   },
   onboarding: {
     welcomeTitle: 'Welcome to OriginAI',

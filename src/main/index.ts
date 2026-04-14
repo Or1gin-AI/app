@@ -1111,6 +1111,13 @@ ipcMain.handle('settings:set', (_e, settings: AppSettings) => {
 function setupAutoUpdater(): void {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
+  const safeLog = (fn: (...a: unknown[]) => void, ...args: unknown[]) => { try { fn(...args) } catch {} }
+  autoUpdater.logger = {
+    info: (...args: unknown[]) => safeLog(console.log, '[updater]', ...args),
+    warn: (...args: unknown[]) => safeLog(console.warn, '[updater]', ...args),
+    error: (...args: unknown[]) => safeLog(console.error, '[updater]', ...args),
+    debug: (...args: unknown[]) => safeLog(console.log, '[updater:debug]', ...args),
+  }
   let pendingVersion = ''
 
   autoUpdater.on('checking-for-update', () => {

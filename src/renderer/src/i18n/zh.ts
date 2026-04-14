@@ -337,6 +337,9 @@ export const zh = {
     installing: '正在重启并安装更新...',
     installingDesc: '应用会自动关闭并重新打开，请稍候。',
     restart: '立即重启',
+    errorTitle: '更新失败',
+    errorDesc: '更新未能完成，请重试。',
+    retry: '重试',
   },
   onboarding: {
     welcomeTitle: '欢迎使用 OriginAI',
