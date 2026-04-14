@@ -56,6 +56,8 @@ export function Titlebar({
 
   const account = showAccount && (
     <div className="flex items-center gap-2.5 text-text-secondary text-[11px] font-mono">
+      <span className="text-text-faint">v{window.electronAPI.appVersion}</span>
+      <span className="text-text-faint">·</span>
       <button
         onClick={onPlanClick}
         className="hover:underline cursor-pointer bg-transparent border-none text-[11px] font-mono text-text-secondary"

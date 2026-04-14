@@ -1143,11 +1143,11 @@ function setupAutoUpdater(): void {
     broadcast('updater:status', { status: 'error', message: String(err) })
   })
 
-  // Check now, then every hour
+  // Check now, then every 10 minutes
   autoUpdater.checkForUpdates().catch(() => { })
   setInterval(() => {
     autoUpdater.checkForUpdates().catch(() => { })
-  }, 60 * 60 * 1000)
+  }, 10 * 60 * 1000)
 }
 
 function broadcast(channel: string, data: unknown): void {
