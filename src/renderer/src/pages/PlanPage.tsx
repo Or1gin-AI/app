@@ -511,7 +511,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
               >
                 <p className="text-xs font-mono text-text-faint mb-1 text-center">{planLabel(id)}</p>
                 <div className="flex items-center justify-center gap-2 mb-0.5">
-                  <span className="text-sm text-text-faint line-through">{CURRENCY}10</span>
+                  <span className="text-sm text-text-faint line-through">{CURRENCY}20</span>
                   <span className="text-2xl font-semibold text-text">{CURRENCY}{price}</span>
                   <span className="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded-full font-medium">-50%</span>
                 </div>
