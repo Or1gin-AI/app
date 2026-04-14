@@ -118,16 +118,28 @@ function generateConfig(
   }
 
   const routingRules: Record<string, unknown>[] = [
+    // Claude / Anthropic domains → proxy
     {
       type: 'field',
       outboundTag: 'proxy',
       domain: [
+        // --- Core Anthropic & Claude ---
         'domain:anthropic.com',
         'domain:anthropic.co',
         'domain:claude.ai',
         'domain:claude.com',
+        'domain:clau.de',
+        'domain:claudemcpclient.com',
         'domain:claudeusercontent.com',
+        // --- CDN & Infrastructure ---
+        'domain:cdn.anthropic.com',
+        'domain:anthropic.com.cdn.cloudflare.net',
+        'domain:servd-anthropic-website.b-cdn.net',
+        // --- Authentication ---
+        'domain:anthropic.auth0.com',
+        // --- Google Storage (model assets) ---
         'domain:storage.googleapis.com',
+        // --- Monitoring: Datadog ---
         'domain:datadoghq.com',
         'domain:datadog.com',
         'domain:ddog-gov.com',
@@ -136,17 +148,23 @@ function generateConfig(
         'domain:browser-intake-datadoghq.com',
         'domain:browser-intake-us3-datadoghq.com',
         'domain:browser-intake-us1-datadoghq.com',
+        // --- Monitoring: Sentry ---
         'domain:sentry.io',
+        // --- Analytics & Feature Flags ---
         'domain:statsigapi.net',
         'domain:statsig.com',
         'domain:segment.io',
         'domain:growthbook.io',
         'domain:split.io',
         'domain:intellimize.co',
+        'domain:cdn.usefathom.com',
+        // --- Customer Support ---
         'domain:intercom.io',
         'domain:intercomcdn.com',
+        // --- Misc ---
         'domain:facebook.net',
         'domain:ipify.org',
+        // --- Regex fallback ---
         'regexp:.*anthropic.*',
         'regexp:.*claude.*',
         'regexp:.*datadog.*',
@@ -156,10 +174,34 @@ function generateConfig(
         'regexp:.*intercom.*',
       ],
     },
+    // Anthropic IP range fallback (when domain doesn't match, resolved IP may hit this)
+    {
+      type: 'field',
+      outboundTag: 'proxy',
+      ip: ['160.79.104.0/21'],
+    },
+    // Block QUIC (UDP 443) to force browsers to fall back to TCP (HTTP/2),
+    // ensuring proxy sniffing can read SNI for proper domain matching
+    {
+      type: 'field',
+      outboundTag: 'block',
+      port: '443',
+      network: 'udp',
+    },
   ]
 
   return {
     log: { loglevel: 'info' },
+    dns: {
+      queryStrategy: 'UseIPv4',
+      servers: [
+        {
+          address: 'https://1.1.1.1/dns-query',
+          skipFallback: true,
+        },
+        'localhost',
+      ],
+    },
     inbounds: [
       {
         tag: 'socks-in',
@@ -177,7 +219,7 @@ function generateConfig(
     ],
     outbounds,
     routing: {
-      domainStrategy: 'AsIs',
+      domainStrategy: 'IPIfNonMatch',
       rules: routingRules,
     },
   }
