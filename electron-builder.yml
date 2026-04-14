@@ -11,6 +11,7 @@ extraResources:
     filter:
       - "**/*"
 artifactName: "OriginAI-${version}-${os}-${arch}.${ext}"
+afterPack: ./scripts/afterPack.js
 mac:
   category: public.app-category.utilities
   icon: resources/icon.icns
