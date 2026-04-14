@@ -19,7 +19,7 @@ interface PlanPageProps {
 
 const PLAN_TIERS: Record<PlanId, number> = { free: 0, standard: 1, pro: 2, enterprise: 3 }
 
-const PLAN_PRICES: Record<PlanId, number> = { free: 0, standard: 5, pro: 10, enterprise: 25 }
+const PLAN_PRICES: Record<PlanId, number> = { free: 0, standard: 10, pro: 10, enterprise: 25 }
 
 const PLAN_TO_PRODUCT: Record<PlanId, string> = {
   free: 'FREE',
