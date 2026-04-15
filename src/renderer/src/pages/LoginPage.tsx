@@ -3,25 +3,6 @@ import { useLocale } from '@/i18n/context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import logoImg from '@/assets/icon-transparent.png'
 
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (container: HTMLElement, options: {
-        sitekey: string
-        callback: (token: string) => void
-        'expired-callback'?: () => void
-        'error-callback'?: () => void
-        theme?: 'light' | 'dark' | 'auto'
-        size?: 'normal' | 'compact'
-      }) => string
-      reset: (widgetId: string) => void
-      remove: (widgetId: string) => void
-    }
-  }
-}
-
-const TURNSTILE_SITE_KEY = '0x4AAAAAAC2Lw36H3wTiNN0w'
-
 type AuthView = 'login' | 'register' | 'otp' | 'reset'
 
 interface LoginPageProps {
@@ -168,55 +149,6 @@ function OtpInput({
   )
 }
 
-/* ── Turnstile widget ── */
-
-function Turnstile({ onToken }: { onToken: (token: string | null) => void }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const widgetIdRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    const mount = () => {
-      if (!containerRef.current || !window.turnstile || widgetIdRef.current) return
-      try {
-        widgetIdRef.current = window.turnstile.render(containerRef.current, {
-          sitekey: TURNSTILE_SITE_KEY,
-          callback: (token) => onToken(token),
-          'expired-callback': () => onToken(null),
-          'error-callback': () => onToken(null),
-          theme: 'light',
-        })
-      } catch {
-        // Turnstile may fail in file:// protocol (production builds)
-        // Allow login without captcha in this case
-        console.warn('[Turnstile] render failed, skipping captcha')
-        onToken('skip')
-      }
-    }
-
-    // turnstile script might not be loaded yet
-    if (window.turnstile) {
-      mount()
-    } else {
-      // If script doesn't load within 5s (e.g. file:// or offline), skip
-      let elapsed = 0
-      const interval = setInterval(() => {
-        elapsed += 200
-        if (window.turnstile) { clearInterval(interval); mount() }
-        else if (elapsed >= 5000) { clearInterval(interval); onToken('skip') }
-      }, 200)
-      return () => clearInterval(interval)
-    }
-
-    return () => {
-      if (widgetIdRef.current && window.turnstile) {
-        try { window.turnstile.remove(widgetIdRef.current) } catch { /* */ }
-        widgetIdRef.current = null
-      }
-    }
-  }, [onToken])
-
-  return <div ref={containerRef} className="flex justify-center mb-4" />
-}
 
 /* ── Main component ── */
 
@@ -263,10 +195,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       }
     })
   }, [])
-
-  // Turnstile
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
-  const handleTurnstileToken = useCallback((token: string | null) => setTurnstileToken(token), [])
 
   // UI state
   const [loading, setLoading] = useState(false)
@@ -342,14 +270,14 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     [],
   )
 
-  const doSignIn = async (token?: string) => {
+  const doSignIn = async () => {
     if (!email || !password) {
       setError(t.login.errorFieldsRequired)
       return
     }
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.signIn(email, password, token)
+      const res = await window.electronAPI.auth.signIn(email, password)
       if (res.status === 200) {
         persistSettings(rememberPassword, autoLogin, autoLaunch, email, password)
         const data = res.data as { user?: { email: string; name: string } }
@@ -358,14 +286,10 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         const errData = res.data as { message?: string; code?: string } | undefined
         const msg = typeof errData === 'object' && errData?.message ? errData.message.toLowerCase() : ''
         if (msg.includes('email') && msg.includes('verif')) {
-          // Genuinely unverified email — don't auto-send OTP here,
-          // Turnstile token is spent. User can resend after new Turnstile loads on OTP page.
           setError(t.login.errorEmailNotVerified)
-          setTurnstileToken(null)
           setOtpSent(false)
           setView('otp')
         } else {
-          // Turnstile failure or other 403
           setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorSignInFailed)
         }
       } else {
@@ -380,7 +304,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
   const handleSignIn = async () => {
     clearMessages()
-    await doSignIn(turnstileToken || undefined)
+    await doSignIn()
   }
 
   const handleForgetPassword = async () => {
@@ -391,7 +315,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
     setLoading(true)
     try {
-      const otpRes = await window.electronAPI.auth.sendOtp(email, 'forget-password', turnstileToken || undefined)
+      const otpRes = await window.electronAPI.auth.sendOtp(email, 'forget-password')
       if (otpRes.status >= 400) {
         const otpErr = otpRes.data as { message?: string } | undefined
         setError(typeof otpErr === 'object' && otpErr?.message ? otpErr.message : t.login.forgetFailed)
@@ -436,26 +360,24 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
   // Auto-login: trigger once after settings load populates credentials
   useEffect(() => {
-    if (pendingAutoLogin.current && email && password && view === 'login') {
-      pendingAutoLogin.current = false
-      doSignIn()
+    if (!pendingAutoLogin.current || !autoLogin || !email || !password || view !== 'login' || loading) {
+      return
     }
-  }) // intentionally no deps — fires after state settles from settings load
+    pendingAutoLogin.current = false
+    void doSignIn()
+  }, [autoLogin, email, password, view, loading])
 
   const handleSignUp = async () => {
     clearMessages()
     if (!registerReady) return
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.signUp(name, email, password, turnstileToken || undefined)
+      const res = await window.electronAPI.auth.signUp(name, email, password)
       if (res.status === 200) {
         setMessage(t.login.registerSuccess)
         setOtp('')
         setOtpSent(false)
-        // The registration request has already consumed the current Turnstile token.
-        // Wait for the OTP page to mount a fresh widget before sending the first code.
         setPendingInitialOtpAutoSend(true)
-        setTurnstileToken(null)
         setView('otp')
       } else {
         const data = res.data as { message?: string }
@@ -474,7 +396,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     if (code.length !== 6) return
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.verifyEmail(email, code, turnstileToken || undefined)
+      const res = await window.electronAPI.auth.verifyEmail(email, code)
       if (res.status === 200) {
         setMessage(t.login.otpSuccess)
         setOtp('')
@@ -493,7 +415,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     clearMessages()
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.sendOtp(email, 'email-verification', turnstileToken || undefined)
+      const res = await window.electronAPI.auth.sendOtp(email, 'email-verification')
       if (res.status >= 400) {
         const errData = res.data as { message?: string } | undefined
         setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorOtpFailed)
@@ -511,7 +433,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     clearMessages()
     setLoading(true)
     try {
-      const res = await window.electronAPI.auth.sendOtp(email, 'email-verification', turnstileToken || undefined)
+      const res = await window.electronAPI.auth.sendOtp(email, 'email-verification')
       if (res.status >= 400) {
         const errData = res.data as { message?: string } | undefined
         setError(typeof errData === 'object' && errData?.message ? errData.message : t.login.errorOtpFailed)
@@ -519,7 +441,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         setMessage(t.login.otpSent)
         setOtpSent(true)
         setPendingInitialOtpAutoSend(false)
-        setTurnstileToken(null) // reset for verify step
       }
     } catch {
       setError(t.login.errorOtpFailed)
@@ -529,16 +450,15 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   }
 
   useEffect(() => {
-    if (view !== 'otp' || otpSent || !pendingInitialOtpAutoSend || !turnstileToken || loading) return
+    if (view !== 'otp' || otpSent || !pendingInitialOtpAutoSend || loading) return
     setPendingInitialOtpAutoSend(false)
     void handleSendInitialOtp()
-  }, [view, otpSent, pendingInitialOtpAutoSend, turnstileToken, loading, handleSendInitialOtp])
+  }, [view, otpSent, pendingInitialOtpAutoSend, loading, handleSendInitialOtp])
 
   const switchToRegister = () => {
     clearMessages()
     setFocused({})
     setDirty({})
-    setTurnstileToken(null)
     setPendingInitialOtpAutoSend(false)
     setView('register')
   }
@@ -547,7 +467,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     clearMessages()
     setFocused({})
     setDirty({})
-    setTurnstileToken(null)
     setPendingInitialOtpAutoSend(false)
     setView('login')
   }
@@ -631,7 +550,10 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                     checked={rememberPassword}
                     onChange={(e) => {
                       setRememberPassword(e.target.checked)
-                      if (!e.target.checked) setAutoLogin(false)
+                      if (!e.target.checked) {
+                        setAutoLogin(false)
+                        pendingAutoLogin.current = false
+                      }
                     }}
                     className="w-3.5 h-3.5 cursor-pointer appearance-none border border-border-strong rounded bg-bg-card checked:bg-brand checked:border-brand transition-colors relative checked:after:content-['✓'] checked:after:text-white checked:after:text-[10px] checked:after:absolute checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
                   />
@@ -644,6 +566,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                     onChange={(e) => {
                       setAutoLogin(e.target.checked)
                       if (e.target.checked) setRememberPassword(true)
+                      else pendingAutoLogin.current = false
                     }}
                     className="w-3.5 h-3.5 cursor-pointer appearance-none border border-border-strong rounded bg-bg-card checked:bg-brand checked:border-brand transition-colors relative checked:after:content-['✓'] checked:after:text-white checked:after:text-[10px] checked:after:absolute checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
                   />
@@ -651,11 +574,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 </label>
               </div>
 
-              <Turnstile onToken={handleTurnstileToken} />
-
               <button
                 onClick={handleSignIn}
-                disabled={loading || !turnstileToken}
+                disabled={loading}
                 className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? '...' : t.login.submit}
@@ -759,11 +680,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 />
               </div>
 
-              <Turnstile onToken={handleTurnstileToken} />
-
               <button
                 onClick={handleSignUp}
-                disabled={loading || !registerReady || !turnstileToken}
+                disabled={loading || !registerReady}
                 className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? '...' : t.login.registerSubmit}
@@ -791,12 +710,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
               {!otpSent ? (
                 <>
-                  {/* Phase 1: Turnstile + send button */}
-                  <Turnstile onToken={handleTurnstileToken} />
-
                   <button
                     onClick={handleSendInitialOtp}
-                    disabled={loading || !turnstileToken}
+                    disabled={loading}
                     className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading ? '...' : t.login.otpSend}
@@ -804,16 +720,13 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 </>
               ) : (
                 <>
-                  {/* Phase 2: OTP input + verify */}
                   <div className="mb-6">
                     <OtpInput value={otp} onChange={setOtp} onComplete={handleVerifyOtp} />
                   </div>
 
-                  <Turnstile onToken={handleTurnstileToken} />
-
                   <button
                     onClick={handleVerifyOtp}
-                    disabled={loading || otp.replace(/[^0-9]/g, '').length !== 6 || !turnstileToken}
+                    disabled={loading || otp.replace(/[^0-9]/g, '').length !== 6}
                     className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading ? '...' : t.login.otpSubmit}
@@ -889,11 +802,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 )}
               </div>
 
-              <Turnstile onToken={handleTurnstileToken} />
-
               <button
                 onClick={handleResetPassword}
-                disabled={loading || !resetReady || !turnstileToken}
+                disabled={loading || !resetReady}
                 className="w-full py-3 bg-brand text-white rounded-lg text-sm font-medium cursor-pointer hover:opacity-90 transition-opacity mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? '...' : t.login.resetSubmit}

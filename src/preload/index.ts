@@ -10,16 +10,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkProxyIp: () => ipcRenderer.invoke('check-proxy-ip'),
   detectSystemProxy: () => ipcRenderer.invoke('detect-system-proxy'),
   auth: {
-    signUp: (username: string, email: string, password: string, turnstileToken?: string) =>
-      ipcRenderer.invoke('auth:sign-up', username, email, password, turnstileToken),
+    signUp: (username: string, email: string, password: string) =>
+      ipcRenderer.invoke('auth:sign-up', username, email, password),
     checkUsername: (username: string) =>
       ipcRenderer.invoke('auth:check-username', username),
-    signIn: (email: string, password: string, turnstileToken?: string) =>
-      ipcRenderer.invoke('auth:sign-in', email, password, turnstileToken),
-    sendOtp: (email: string, type: string, turnstileToken?: string) =>
-      ipcRenderer.invoke('auth:send-otp', email, type, turnstileToken),
-    verifyEmail: (email: string, otp: string, turnstileToken?: string) =>
-      ipcRenderer.invoke('auth:verify-email', email, otp, turnstileToken),
+    signIn: (email: string, password: string) =>
+      ipcRenderer.invoke('auth:sign-in', email, password),
+    sendOtp: (email: string, type: string) =>
+      ipcRenderer.invoke('auth:send-otp', email, type),
+    verifyEmail: (email: string, otp: string) =>
+      ipcRenderer.invoke('auth:verify-email', email, otp),
     getSession: () => ipcRenderer.invoke('auth:get-session'),
     getNewuser: () => ipcRenderer.invoke('auth:get-newuser'),
     setNewuser: (value: number) => ipcRenderer.invoke('auth:set-newuser', value),

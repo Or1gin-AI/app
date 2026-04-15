@@ -269,7 +269,7 @@ function createWindow(): void {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    // Serve via localhost so Turnstile works (file:// has null origin, Cloudflare rejects it)
+    // Serve via localhost (file:// has null origin, some APIs reject it)
     const rendererDir = join(__dirname, '../renderer')
     const { extname: pathExt } = require('path') as typeof import('path')
     const MIME: Record<string, string> = {
@@ -722,32 +722,32 @@ ipcMain.handle('auth:restore-session', async () => {
   return { ok: false }
 })
 
-ipcMain.handle('auth:sign-up', async (_e, username: string, email: string, password: string, turnstileToken?: string) => {
-  return authFetch('POST', '/api/auth/sign-up/email', { name: username, username, email, password, turnstileToken })
+ipcMain.handle('auth:sign-up', async (_e, username: string, email: string, password: string) => {
+  return authFetch('POST', '/api/auth/sign-up/email', { name: username, username, email, password })
 })
 
 ipcMain.handle('auth:check-username', async (_e, username: string) => {
   return authFetch('GET', `/api/auth/is-username-available?username=${encodeURIComponent(username)}`)
 })
 
-ipcMain.handle('auth:sign-in', async (_e, email: string, password: string, turnstileToken?: string) => {
+ipcMain.handle('auth:sign-in', async (_e, email: string, password: string) => {
   // Clear old session to avoid stale emailVerified state
   sessionCookies = []
   sessionToken = null
   sessionUser = undefined
-  const res = await authFetch('POST', '/api/auth/sign-in/email', { email, password, turnstileToken })
+  const res = await authFetch('POST', '/api/auth/sign-in/email', { email, password })
   if (res.status === 200) {
     captureSession(res.data)
   }
   return res
 })
 
-ipcMain.handle('auth:send-otp', async (_e, email: string, type: string, turnstileToken?: string) => {
-  return authFetch('POST', '/api/auth/email-otp/send-verification-otp', { email, type, turnstileToken })
+ipcMain.handle('auth:send-otp', async (_e, email: string, type: string) => {
+  return authFetch('POST', '/api/auth/email-otp/send-verification-otp', { email, type })
 })
 
-ipcMain.handle('auth:verify-email', async (_e, email: string, otp: string, turnstileToken?: string) => {
-  return authFetch('POST', '/api/auth/email-otp/verify-email', { email, otp, turnstileToken })
+ipcMain.handle('auth:verify-email', async (_e, email: string, otp: string) => {
+  return authFetch('POST', '/api/auth/email-otp/verify-email', { email, otp })
 })
 
 ipcMain.handle('auth:get-session', async () => {
@@ -1147,14 +1147,20 @@ function setupAutoUpdater(): void {
   })
 
   autoUpdater.on('error', (err) => {
-    broadcast('updater:status', { status: 'error', message: String(err) })
+    const msg = String(err)
+    if (msg.includes('ERR_NETWORK_CHANGED')) {
+      console.warn('[updater] network changed during update, retrying in 5s…')
+      setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 5_000)
+      return
+    }
+    broadcast('updater:status', { status: 'error', message: msg })
   })
 
-  // Check now, then every 10 minutes
+  // Check now, then every hour
   autoUpdater.checkForUpdates().catch(() => { })
   setInterval(() => {
     autoUpdater.checkForUpdates().catch(() => { })
-  }, 10 * 60 * 1000)
+  }, 60 * 60 * 1000)
 }
 
 function broadcast(channel: string, data: unknown): void {
@@ -1223,7 +1229,7 @@ app.whenReady().then(async () => {
   await killOrphanedHelper()
 
   // Crash recovery: if system proxy points to our port but Xray isn't running, clean up
-  // MUST complete before creating window — stale proxy breaks Cloudflare Turnstile loading
+  // MUST complete before creating window — stale proxy breaks outbound requests
   const hadStaleProxy = await checkSystemProxy().then(async (ours) => {
     if (ours && !isSidecarRunning()) {
       console.log('[proxy] stale system proxy detected from previous crash, cleaning up')
