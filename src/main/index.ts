@@ -1255,8 +1255,8 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Start auto-updater (skip in dev)
-  if (!is.dev) {
+  // Start auto-updater (skip in dev; skip on macOS — no code signing certificate)
+  if (!is.dev && process.platform !== 'darwin') {
     setupAutoUpdater()
   }
 
