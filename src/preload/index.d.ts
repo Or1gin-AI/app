@@ -27,11 +27,11 @@ declare global {
       checkProxyIp: () => Promise<{ ok: boolean; ip: string | null }>
       detectSystemProxy: () => Promise<{ found: boolean; host?: string; port?: string }>
       auth: {
-        signUp: (username: string, email: string, password: string, turnstileToken?: string) => Promise<AuthResponse>
+        signUp: (username: string, email: string, password: string) => Promise<AuthResponse>
         checkUsername: (username: string) => Promise<AuthResponse>
-        signIn: (email: string, password: string, turnstileToken?: string) => Promise<AuthResponse>
-        sendOtp: (email: string, type: string, turnstileToken?: string) => Promise<AuthResponse>
-        verifyEmail: (email: string, otp: string, turnstileToken?: string) => Promise<AuthResponse>
+        signIn: (email: string, password: string) => Promise<AuthResponse>
+        sendOtp: (email: string, type: string) => Promise<AuthResponse>
+        verifyEmail: (email: string, otp: string) => Promise<AuthResponse>
         getSession: () => Promise<AuthResponse>
         getNewuser: () => Promise<AuthResponse>
         setNewuser: (value: number) => Promise<AuthResponse>
