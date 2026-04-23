@@ -60,8 +60,6 @@ type ModalState =
   | { step: 'redeem-success'; productType: string; expireAt: string }
   | { step: 'waiting'; afterClose?: { type: 'redeem'; target: PaymentTarget } }
   | { step: 'upgrade-success'; previousPlan: string; newPlan: string; proratedPrice: number }
-  | { step: 'cancel-confirm' }
-  | { step: 'helio-cancel-warning' }
   | { step: 'activate-confirm' }
   | { step: 'activate'; phase: 'loading' | 'polling' | 'done' | 'error'; sms: SmsData; errorMsg?: string }
   | { step: 'error'; message: string }
@@ -277,11 +275,11 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
 
   const currentIdx = PLAN_ORDER.indexOf(currentPlan)
 
-  const handleContinuePayment = useCallback(async (plan: PlanId) => {
-    setCheckoutLoading('stripe')
+  const handleContinuePayment = useCallback(async (plan: PlanId, provider: string) => {
+    setCheckoutLoading(provider === 'HELIO' ? 'crypto' : 'stripe')
     try {
       const productType = PLAN_TO_PRODUCT[plan]
-      const res = await window.electronAPI.payment.checkout(productType, 'LEMONSQUEEZY', claudeAccountId || undefined)
+      const res = await window.electronAPI.payment.checkout(productType, provider, claudeAccountId || undefined)
       if ((res.status === 200 || res.status === 201) && (res.data as any)?.checkoutUrl) {
         const data = res.data as { checkoutUrl: string }
         setModal({ step: 'waiting' })
@@ -298,9 +296,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
 
   const handleSelect = (plan: PlanId) => {
     if (plan === currentPlan) return
-    if (plan === 'free') {
-      setModal({ step: 'cancel-confirm' })
-    } else if (PLAN_ORDER.indexOf(plan) > currentIdx) {
+    if (PLAN_ORDER.indexOf(plan) > currentIdx) {
       setModal({ step: 'confirm', target: plan })
     }
   }
@@ -557,17 +553,17 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                     <div className="flex flex-col items-center gap-1.5">
                       <span className="text-xs text-brand font-medium">{t.plan.current}</span>
                       <button
-                        onClick={() => setModal({ step: 'cancel-confirm' })}
-                        className="w-full py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-colors bg-transparent border border-border-strong text-text-faint hover:text-red-500 hover:border-red-300"
+                        onClick={() => setModal({ step: 'payment', target: id })}
+                        className="w-full py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-opacity hover:opacity-90 bg-brand text-white"
                       >
-                        {t.plan.cancelSubscription}
+                        {t.plan.renewSubscription}
                       </button>
                     </div>
                   ) : isCurrent ? (
                     <span className="text-xs text-brand font-medium py-1.5 block text-center">{t.plan.current}</span>
                   ) : isPaying && pendingOrder ? (
                     <button
-                      onClick={() => handleContinuePayment(id)}
+                      onClick={() => handleContinuePayment(id, pendingOrder.paymentProvider)}
                       disabled={!!checkoutLoading}
                       className="w-full py-2 rounded-lg text-xs font-medium cursor-pointer transition-opacity hover:opacity-90 bg-amber-500 text-white disabled:opacity-50"
                     >
@@ -628,7 +624,12 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                       <td className="py-2.5 px-4 text-text-secondary">{order.createdAt.split('T')[0]}</td>
                       <td className="py-2.5 px-4 text-text">{t.plan.productTypes[order.productType] || order.productType}</td>
                       <td className="py-2.5 px-4 text-text text-right">${(order.price / 100).toFixed(2)}</td>
-                      <td className="py-2.5 px-4 text-text-secondary text-[12px]">{order.paymentProvider === 'LEMONSQUEEZY' ? 'Stripe' : 'Crypto'}</td>
+                      <td className="py-2.5 px-4 text-text-secondary text-[12px]">{
+                        order.paymentProvider === 'LEMONSQUEEZY' ? 'Stripe' :
+                        order.paymentProvider === 'HELIO' ? 'Crypto' :
+                        order.paymentProvider === 'REDEEM_CODE' ? t.plan.payRedeem :
+                        order.paymentProvider
+                      }</td>
                       <td className="py-2.5 px-4 text-right">
                         <span className={`text-[11px] font-medium ${
                           order.status === 'COMPLETED' ? 'text-green-600' :
@@ -835,57 +836,6 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                   {t.plan.ok}
                 </button>
               </div>
-            )}
-
-            {/* Cancel subscription */}
-            {modal.step === 'cancel-confirm' && (
-              <>
-                <h3 className="font-serif text-base text-text mb-2">{t.plan.cancelTitle}</h3>
-                <p className="text-sm text-text-muted mb-5">
-                  {t.plan.cancelConfirmDesc.replace('{plan}', planLabel(currentPlan))}
-                </p>
-                <div className="flex gap-3">
-                  <button onClick={() => setModal(null)} className="flex-1 py-2 rounded-lg text-sm border border-border-strong text-text-secondary cursor-pointer hover:bg-black/[0.03] transition-colors">
-                    {t.plan.keepPlan}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const lastOrder = orders.find(o => o.status === 'COMPLETED' && o.orderType === 'SUBSCRIPTION')
-                      const isHelio = lastOrder?.paymentProvider === 'HELIO'
-                      try {
-                        track(EVENTS.SUBSCRIPTION_CANCELLED, { plan: currentPlan, provider: isHelio ? 'HELIO' : 'LEMONSQUEEZY' })
-                        const res = await window.electronAPI.payment.cancelSubscription(claudeAccountId)
-                        if (res.status >= 200 && res.status < 300) {
-                          if (isHelio) { setModal({ step: 'helio-cancel-warning' }) } else { setModal(null) }
-                          onRefresh()
-                        } else {
-                          const errData = res.data as { message?: string } | undefined
-                          setModal({ step: 'error', message: typeof errData === 'object' && errData?.message ? errData.message : t.plan.cancelError })
-                        }
-                      } catch {
-                        setModal({ step: 'error', message: t.plan.cancelError })
-                      }
-                    }}
-                    className="flex-1 py-2 rounded-lg text-sm bg-red-500 text-white cursor-pointer hover:opacity-90 transition-opacity"
-                  >
-                    {t.plan.confirmCancel}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* Helio cancel warning */}
-            {modal.step === 'helio-cancel-warning' && (
-              <>
-                <h3 className="font-serif text-base text-red-600 mb-3">{t.plan.helioCancelWarningTitle}</h3>
-                <p className="text-sm text-text-muted mb-3">{t.plan.helioCancelWarningDesc}</p>
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4">
-                  <p className="text-xs text-red-700 font-medium">{t.plan.helioCancelWarningBold}</p>
-                </div>
-                <button onClick={() => setModal(null)} className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity">
-                  {t.plan.helioCancelUnderstood}
-                </button>
-              </>
             )}
 
             {/* Activation confirm */}

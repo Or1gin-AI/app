@@ -42,4 +42,4 @@ pnpm build:mac    # 构建 macOS 安装包
 4. GitHub Actions 自动构建三平台（Mac/Win/Linux）并发布到 GitHub Releases
 5. 客户端自动更新拉取新版本
 
-当前版本：v0.2.2
+当前版本：v0.3.0

@@ -1178,9 +1178,14 @@ async function runUpdaterInstallCleanup(): Promise<void> {
   // Clear shell env synchronously first so a partial quit still restores the terminal.
   clearShellProxy()
 
+  // On Windows the NSIS installer cannot replace .exe files that are still running,
+  // so we must actively stop the helper here (unlike normal quit which lets it self-exit).
+  stopHelper()
+
   const cleanupSteps: Array<[string, Promise<unknown>]> = [
     ['clear system proxy', withTimeout(clearSystemProxy(), 4_000, 'clear system proxy')],
     ['stop sidecar', withTimeout(stopSidecar(), 4_000, 'stop sidecar')],
+    ['kill orphaned helper', withTimeout(killOrphanedHelper(), 2_000, 'kill orphaned helper')],
   ]
 
   const results = await Promise.allSettled(cleanupSteps.map(([, promise]) => promise))
@@ -1189,6 +1194,10 @@ async function runUpdaterInstallCleanup(): Promise<void> {
       console.warn(`[updater] ${cleanupSteps[index][0]} failed:`, result.reason)
     }
   })
+
+  if (process.platform === 'win32') {
+    killOrphanedSidecar()
+  }
 }
 
 ipcMain.handle('updater:install', async () => {
@@ -1206,7 +1215,7 @@ ipcMain.handle('updater:install', async () => {
 
   setImmediate(() => {
     try {
-      autoUpdater.quitAndInstall(false, true)
+      autoUpdater.quitAndInstall(true, true)
     } catch (err) {
       updaterInstallInProgress = false
       const message = err instanceof Error ? err.message : String(err)
