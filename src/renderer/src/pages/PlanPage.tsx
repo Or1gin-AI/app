@@ -30,12 +30,6 @@ const PLAN_TO_PRODUCT: Record<PlanId, string> = {
 
 const PLAN_ORDER: PlanId[] = ['standard']
 
-const PLAN_FEATURES: Record<Exclude<PlanId, 'free'>, { ipKey: string; ipDescKey: string; activations: number; devices: number }> = {
-  standard: { ipKey: 'ipApartment', ipDescKey: 'ipApartmentDesc', activations: 1, devices: 1 },
-  pro: { ipKey: 'ipVilla', ipDescKey: 'ipVillaDesc', activations: 3, devices: 3 },
-  enterprise: { ipKey: 'ipPremiumVilla', ipDescKey: 'ipPremiumVillaDesc', activations: 10, devices: 10 },
-}
-
 const CURRENCY = '$'
 
 const LDXP_PAYMENT_URL = 'https://pay.ldxp.cn/item/nzcb52'
@@ -423,7 +417,9 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
     setModal({ step: 'redeem', target })
   }, [claudeAccountId, t])
 
-  const handleBuyActivation = () => { setModal({ step: 'payment', target: 'activation' as PlanId }) }
+  const handleBuyActivation = () => {
+    window.electronAPI.payment.openCheckout('https://pay.ldxp.cn/shop/EWP3O6VO/9weq3v').catch(() => {})
+  }
 
   const planLabel = (id: PlanId) => t.plan.plans[id]
   const hasPaidPlan = currentPlan !== 'free'
@@ -506,7 +502,6 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
           {PLAN_ORDER.map((id) => {
             const isCurrent = id === currentPlan
             const price = PLAN_PRICES[id]
-            const features = PLAN_FEATURES[id]
             const targetTier = PLAN_TIERS[id]
             const currentTier = PLAN_TIERS[currentPlan]
             const isHigher = targetTier > currentTier
@@ -532,20 +527,14 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                 <p className="text-[10px] text-text-faint text-center mb-3">{t.plan.serviceFee}</p>
 
                 {/* Features */}
-                <div className="space-y-1.5 mb-4 text-[11px] text-text-muted">
-                  <div className="flex justify-between">
-                    <span className="text-text-faint">{t.plan.ipType}</span>
-                    <span>{(t.plan as any)[features.ipKey]}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-faint">{t.plan.activations}</span>
-                    <span>{features.activations}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-faint">{t.plan.devices}</span>
-                    <span>{features.devices}</span>
-                  </div>
-                </div>
+                <ul className="space-y-1.5 mb-4 text-[11px] text-text-muted">
+                  {t.plan.featureList.map((item, idx) => (
+                    <li key={idx} className="flex gap-1.5 items-start">
+                      <span className="text-brand mt-[2px] shrink-0">✓</span>
+                      <span className="leading-relaxed">{item}</span>
+                    </li>
+                  ))}
+                </ul>
 
                 {/* Action button */}
                 <div className="mt-auto">
