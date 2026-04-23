@@ -24,34 +24,15 @@ const pageTransition = {
   transition: { duration: 0.35 },
 }
 
-function UpdateOverlay({ status, version, percent, errorMessage }: { status: string; version: string; percent: number; errorMessage: string }): React.JSX.Element {
+function UpdateOverlay({ status, errorMessage }: { status: string; errorMessage: string }): React.JSX.Element {
   const { t } = useLocale()
-  const isReady = status === 'downloaded'
   const isInstalling = status === 'installing'
   const isError = status === 'error'
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full mx-4 text-center">
-        {isReady ? (
-          <>
-            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center">
-              <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {t.updater.ready.replace('{version}', version)}
-            </h3>
-            <p className="text-sm text-gray-500 mb-6">{t.updater.readyDesc}</p>
-            <button
-              onClick={() => window.electronAPI.updater.install()}
-              className="w-full py-2.5 rounded-lg bg-brand text-white font-medium hover:opacity-90 transition-opacity"
-            >
-              {t.updater.restart}
-            </button>
-          </>
-        ) : isInstalling ? (
+        {isInstalling ? (
           <>
             <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">
               <svg className="w-6 h-6 text-blue-600 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -79,28 +60,52 @@ function UpdateOverlay({ status, version, percent, errorMessage }: { status: str
               {t.updater.retry}
             </button>
           </>
-        ) : (
-          <>
-            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">
-              <svg className="w-6 h-6 text-blue-600 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {t.updater.downloading.replace('{version}', version)}
-            </h3>
-            <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-              <div
-                className="bg-brand h-2 rounded-full transition-all duration-300"
-                style={{ width: `${percent}%` }}
-              />
-            </div>
-            <p className="text-sm text-gray-400">{percent}%</p>
-          </>
-        )}
+        ) : null}
       </div>
     </div>
+  )
+}
+
+function UpdatePill({ status, version, percent, onDismiss }: { status: string; version: string; percent: number; onDismiss: () => void }): React.JSX.Element | null {
+  const { t } = useLocale()
+  if (status !== 'downloading' && status !== 'downloaded') return null
+  const isReady = status === 'downloaded'
+  const text = isReady
+    ? t.updater.pillReady.replace('{version}', version)
+    : t.updater.pillDownloading.replace('{version}', version)
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 12 }}
+      className="fixed bottom-4 right-4 z-[9998] max-w-xs rounded-xl border border-border bg-bg-card shadow-lg px-3.5 py-2.5 flex items-center gap-3"
+    >
+      <div className="flex-shrink-0">
+        {isReady ? (
+          <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        ) : (
+          <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center">
+            <span className="text-[10px] font-mono text-brand">{percent}%</span>
+          </div>
+        )}
+      </div>
+      <span className="text-[12px] text-text-secondary leading-snug flex-1">{text}</span>
+      {isReady && (
+        <button
+          onClick={onDismiss}
+          className="text-text-faint hover:text-text-secondary transition-colors cursor-pointer bg-transparent border-none text-[11px] shrink-0"
+          aria-label={t.updater.pillDismiss}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+    </motion.div>
   )
 }
 
@@ -423,16 +428,32 @@ function App(): React.JSX.Element {
     }
   }, [userPlan])
 
-  const showUpdateOverlay =
-    updateStatus === 'downloading' ||
-    updateStatus === 'downloaded' ||
-    updateStatus === 'installing' ||
-    updateStatus === 'error'
+  // Overlay is only shown while actively installing (user clicked restart)
+  // or when an error needs user attention. Downloaded/downloading use the
+  // non-blocking pill and let autoInstallOnAppQuit handle the actual install.
+  const showUpdateOverlay = updateStatus === 'installing' || updateStatus === 'error'
+  const [updatePillDismissed, setUpdatePillDismissed] = useState(false)
+  useEffect(() => {
+    // Reset the dismissed flag when a new version becomes available,
+    // so the pill re-appears if the user downloads yet another version later.
+    if (updateStatus === 'checking' || updateStatus === 'downloading') setUpdatePillDismissed(false)
+  }, [updateStatus])
+  const showUpdatePill = !updatePillDismissed && (updateStatus === 'downloading' || updateStatus === 'downloaded')
 
   return (
     <LocaleProvider>
       <div className="h-full flex flex-col bg-bg">
-        {showUpdateOverlay && <UpdateOverlay status={updateStatus} version={updateVersion} percent={updatePercent} errorMessage={updateError} />}
+        {showUpdateOverlay && <UpdateOverlay status={updateStatus} errorMessage={updateError} />}
+        <AnimatePresence>
+          {showUpdatePill && (
+            <UpdatePill
+              status={updateStatus}
+              version={updateVersion}
+              percent={updatePercent}
+              onDismiss={() => setUpdatePillDismissed(true)}
+            />
+          )}
+        </AnimatePresence>
         <Titlebar
           showAccount={page !== 'login' && page !== 'loading'}
           showIndicator={userPlan !== 'free' && (page === 'main' || page === 'plan' || page === 'network-status')}

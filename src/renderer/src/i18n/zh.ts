@@ -365,6 +365,9 @@ export const zh = {
     errorTitle: '更新失败',
     errorDesc: '更新未能完成，请重试。',
     retry: '重试',
+    pillReady: '新版本 v{version} 已就绪，下次启动时自动更新',
+    pillDownloading: '正在后台下载新版本 v{version}...',
+    pillDismiss: '知道了',
   },
   onboarding: {
     welcomeTitle: '欢迎使用 OriginAI',
