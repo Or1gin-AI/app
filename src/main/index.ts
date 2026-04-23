@@ -1160,11 +1160,9 @@ function setupAutoUpdater(): void {
     broadcast('updater:status', { status: 'error', message: msg })
   })
 
-  // Check now, then every hour
+  // Check once at startup only. In-session updates are not polled —
+  // autoInstallOnAppQuit will apply any downloaded update on next launch.
   autoUpdater.checkForUpdates().catch(() => { })
-  setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => { })
-  }, 60 * 60 * 1000)
 }
 
 function broadcast(channel: string, data: unknown): void {

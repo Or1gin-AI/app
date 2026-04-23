@@ -365,6 +365,9 @@ export const en = {
     errorTitle: 'Update Failed',
     errorDesc: 'The update could not be completed. Please try again.',
     retry: 'Retry',
+    pillReady: 'Update v{version} ready — will install on next launch',
+    pillDownloading: 'Downloading update v{version} in background...',
+    pillDismiss: 'Got it',
   },
   onboarding: {
     welcomeTitle: 'Welcome to OriginAI',
