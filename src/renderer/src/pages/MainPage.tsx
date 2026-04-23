@@ -25,10 +25,14 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
 
   const webSteps = [
     <>{t.main.claudeWeb.step1}</>,
-    <>{t.main.claudeWeb.step2}</>,
+    <>{t.main.claudeWeb.step2Prefix}<strong className="font-semibold text-text">{t.main.claudeWeb.step2Bold}</strong>{t.main.claudeWeb.step2Suffix}</>,
     <>{t.main.claudeWeb.step3}</>,
     <>{t.main.claudeWeb.step4}</>,
   ]
+
+  const handleGetGmail = () => {
+    window.electronAPI.payment.openCheckout('https://pay.ldxp.cn/item/4p0oqt').catch(() => {})
+  }
 
   const codeSteps = [
     <>{t.main.claudeCode.step1} <code className="bg-bg-alt px-1.5 py-0.5 rounded text-xs text-brand">claude login</code></>,
@@ -88,7 +92,7 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
               </div>
 
               {/* Steps */}
-              <div className="text-[13px] text-text-secondary leading-relaxed mb-6 space-y-2.5">
+              <div className="text-[13px] text-text-secondary leading-relaxed mb-4 space-y-2.5">
                 {webSteps.map((content, i) => (
                   <div key={i} className="flex gap-2 items-start">
                     <span className="text-brand font-mono text-[12px] mt-[1px] shrink-0">{i + 1}.</span>
@@ -96,6 +100,13 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
                   </div>
                 ))}
               </div>
+
+              <button
+                onClick={handleGetGmail}
+                className="w-full py-2 rounded-lg text-[12px] font-medium border border-brand/30 text-brand bg-brand/[0.04] hover:bg-brand/[0.08] cursor-pointer transition-colors"
+              >
+                {t.main.claudeWeb.noGmailButton}
+              </button>
 
             </motion.div>
           ) : (
