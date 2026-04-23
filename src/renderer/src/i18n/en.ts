@@ -282,7 +282,8 @@ export const en = {
     // Waiting for payment
     waitingTitle: 'Completing Payment',
     waitingDesc: 'Please complete your payment in the checkout window.',
-    // Cancel subscription
+    // Renew / Cancel subscription
+    renewSubscription: 'Renew',
     cancelSubscription: 'Cancel',
     cancelTitle: 'Cancel Subscription',
     cancelConfirmDesc: 'Cancel your {plan}? Access will end immediately.',
@@ -322,7 +323,7 @@ export const en = {
       PAUSED: 'Paused',
       REFUNDED: 'Refunded',
     } as Record<string, string>,
-    disclaimer: 'All prices are monthly service fees. Actual charges may vary slightly due to payment processor fees. To switch payment methods, cancel your current plan and resubscribe.',
+    disclaimer: 'All prices are monthly service fees. Actual charges may vary slightly due to payment processor fees.',
   },
   titlebar: {
     networkOk: 'Connected',

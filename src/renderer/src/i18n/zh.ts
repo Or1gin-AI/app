@@ -282,7 +282,8 @@ export const zh = {
     // Waiting for payment
     waitingTitle: '等待支付',
     waitingDesc: '请在弹出的窗口中完成支付，完成后将自动关闭。',
-    // Cancel subscription
+    // Renew / Cancel subscription
+    renewSubscription: '续费',
     cancelSubscription: '取消订阅',
     cancelTitle: '取消订阅',
     cancelConfirmDesc: '确定要取消 {plan} 吗？取消后将立即失去访问权限。',
@@ -322,7 +323,7 @@ export const zh = {
       PAUSED: '已暂停',
       REFUNDED: '已退款',
     } as Record<string, string>,
-    disclaimer: '所有标价均为月度服务费。实际支付金额可能因支付渠道手续费略有差异。如需切换支付方式，须先取消当前订阅后重新订阅。',
+    disclaimer: '所有标价均为月度服务费。实际支付金额可能因支付渠道手续费略有差异。',
   },
   titlebar: {
     networkOk: '网络正常',

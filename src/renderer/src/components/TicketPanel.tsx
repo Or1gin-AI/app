@@ -230,8 +230,10 @@ export function TicketPanel({ onClose }: TicketPanelProps) {
 
   // ── Render ──
 
+  const isWindows = window.electronAPI.platform === 'win32'
+
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div className={`fixed inset-0 z-50 flex items-stretch ${isWindows ? 'justify-start' : 'justify-end'}`} style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       {/* Backdrop */}
       <motion.div
         className="absolute inset-0 bg-black/25"
@@ -244,10 +246,10 @@ export function TicketPanel({ onClose }: TicketPanelProps) {
 
       {/* Panel */}
       <motion.div
-        className="relative z-10 w-full max-w-[480px] bg-bg border-l border-border flex flex-col shadow-xl"
-        initial={{ x: '100%' }}
+        className={`relative z-10 w-full max-w-[480px] bg-bg ${isWindows ? 'border-r' : 'border-l'} border-border flex flex-col shadow-xl`}
+        initial={{ x: isWindows ? '-100%' : '100%' }}
         animate={{ x: 0 }}
-        exit={{ x: '100%' }}
+        exit={{ x: isWindows ? '-100%' : '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
       >
         {/* Header */}
