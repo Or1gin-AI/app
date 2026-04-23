@@ -73,6 +73,7 @@ declare global {
         onCheckoutClosed: (cb: () => void) => () => void
         orders: (page?: number, limit?: number) => Promise<AuthResponse>
         cancelSubscription: (claudeAccountId: string) => Promise<AuthResponse>
+        emailInvoice: (orderId: string, name: string, email: string) => Promise<AuthResponse>
       }
       claudeAccount: {
         createSelfService: (email?: string) => Promise<AuthResponse>

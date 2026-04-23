@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('payment:orders', page, limit),
     cancelSubscription: (claudeAccountId: string) =>
       ipcRenderer.invoke('payment:cancel-subscription', claudeAccountId),
+    emailInvoice: (orderId: string, name: string, email: string) =>
+      ipcRenderer.invoke('payment:email-invoice', orderId, name, email),
   },
   claudeAccount: {
     createSelfService: (email?: string) => ipcRenderer.invoke('claude-account:create-self-service', email),
