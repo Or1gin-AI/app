@@ -235,7 +235,7 @@ export const en = {
     // Activation
     activationTitle: 'Activation Service',
     activationRemaining: 'Remaining',
-    activationBuy: 'SMS Activation Service',
+    activationBuy: 'Buy Extra SMS Activations',
     activationActivate: 'Activate',
     // Activate modal
     activateConfirmTitle: 'Confirm Activation',
@@ -325,6 +325,8 @@ export const en = {
     invoiceModalDesc: 'The name below will appear as "Bill to" on the PDF, and the invoice will be sent to the email you enter.',
     invoiceModalName: 'Name on invoice',
     invoiceModalNamePlaceholder: 'e.g. Your name or company',
+    invoiceModalNameAsciiHint: 'English letters only.',
+    invoiceIssued: 'Issued',
     invoiceModalEmail: 'Deliver to email',
     invoiceModalEmailPlaceholder: 'name@example.com',
     invoiceModalSend: 'Send',

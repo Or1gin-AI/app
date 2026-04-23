@@ -235,7 +235,7 @@ export const zh = {
     // Activation
     activationTitle: '激活服务',
     activationRemaining: '剩余次数',
-    activationBuy: '手机号激活服务',
+    activationBuy: '购买额外手机号激活次数',
     activationActivate: '激活账号',
     // Activate modal
     activateConfirmTitle: '确认激活',
@@ -325,6 +325,8 @@ export const zh = {
     invoiceModalDesc: '下方填写的姓名会作为 PDF 发票上的 "Bill to"，发票会发送到你填写的邮箱。',
     invoiceModalName: '发票抬头',
     invoiceModalNamePlaceholder: '个人姓名或公司名称',
+    invoiceModalNameAsciiHint: '仅支持英文字母与常用标点。',
+    invoiceIssued: '已开具',
     invoiceModalEmail: '接收邮箱',
     invoiceModalEmailPlaceholder: 'name@example.com',
     invoiceModalSend: '发送',
