@@ -239,7 +239,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   }, [refreshBalance])
 
   // Order history
-  type Order = { id: string; productType: string; orderType: string; price: number; currency: string; status: string; paymentProvider: string; createdAt: string }
+  type Order = { id: string; productType: string; orderType: string; price: number; currency: string; status: string; paymentProvider: string; createdAt: string; invoiceEmailedAt?: string | null }
   const [orders, setOrders] = useState<Order[]>([])
   const [ordersLoading, setOrdersLoading] = useState(true)
 
@@ -690,12 +690,16 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                       </td>
                       <td className="py-2.5 px-4 text-right">
                         {order.status === 'COMPLETED' ? (
-                          <button
-                            onClick={() => openInvoiceModal(order.id)}
-                            className="text-xs px-3 py-1.5 rounded-lg border border-border-strong text-text-muted hover:text-brand hover:border-brand/40 cursor-pointer transition-colors"
-                          >
-                            {t.plan.openInvoice}
-                          </button>
+                          order.invoiceEmailedAt ? (
+                            <span className="text-[11px] font-medium text-green-600">{t.plan.invoiceIssued}</span>
+                          ) : (
+                            <button
+                              onClick={() => openInvoiceModal(order.id)}
+                              className="text-xs px-3 py-1.5 rounded-lg border border-border-strong text-text-muted hover:text-brand hover:border-brand/40 cursor-pointer transition-colors"
+                            >
+                              {t.plan.openInvoice}
+                            </button>
+                          )
                         ) : (
                           <span className="text-[11px] text-text-faint">—</span>
                         )}
@@ -1023,12 +1027,13 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                   <input
                     type="text"
                     value={invoiceName}
-                    onChange={(e) => setInvoiceName(e.target.value)}
+                    onChange={(e) => setInvoiceName(e.target.value.replace(/[^\x20-\x7E]/g, ''))}
                     placeholder={t.plan.invoiceModalNamePlaceholder}
                     disabled={invoiceSubmitting}
                     maxLength={120}
                     className="w-full px-3 py-2 rounded-lg border border-border bg-bg text-sm text-text outline-none focus:border-brand/50 disabled:opacity-60"
                   />
+                  <p className="mt-1 text-[10px] text-text-faint">{t.plan.invoiceModalNameAsciiHint}</p>
                 </div>
                 <div className="mb-4">
                   <label className="block text-[11px] text-text-faint font-mono mb-1.5">{t.plan.invoiceModalEmail}</label>
