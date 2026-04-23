@@ -38,6 +38,8 @@ const PLAN_FEATURES: Record<Exclude<PlanId, 'free'>, { ipKey: string; ipDescKey:
 
 const CURRENCY = '$'
 
+const LDXP_PAYMENT_URL = 'https://pay.ldxp.cn/item/nzcb52'
+
 type PaymentTarget = PlanId | 'activation'
 
 type SmsData = {
@@ -56,7 +58,7 @@ type ModalState =
   | { step: 'payment'; target: PaymentTarget }
   | { step: 'redeem'; target: PaymentTarget }
   | { step: 'redeem-success'; productType: string; expireAt: string }
-  | { step: 'waiting' }
+  | { step: 'waiting'; afterClose?: { type: 'redeem'; target: PaymentTarget } }
   | { step: 'upgrade-success'; previousPlan: string; newPlan: string; proratedPrice: number }
   | { step: 'cancel-confirm' }
   | { step: 'helio-cancel-warning' }
@@ -255,7 +257,12 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   // Listen for checkout window close
   useEffect(() => {
     cleanupRef.current = window.electronAPI.payment.onCheckoutClosed(() => {
-      setModal(null)
+      setModal((prev) => {
+        if (prev && prev.step === 'waiting' && prev.afterClose?.type === 'redeem') {
+          return { step: 'redeem', target: prev.afterClose.target }
+        }
+        return null
+      })
       refreshPlanState()
       clearRefreshTimers()
       for (const delay of [1500, 4000, 8000]) {
@@ -343,7 +350,23 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   const handlePaymentSelect = useCallback(async (method: 'stripe' | 'crypto') => {
     if (!modal || modal.step !== 'payment') return
     track(EVENTS.PAYMENT_METHOD_SELECTED, { method, target: modal.target })
-    const provider = method === 'stripe' ? 'LEMONSQUEEZY' : 'HELIO'
+
+    if (method === 'stripe') {
+      const target = modal.target
+      setCheckoutLoading('stripe')
+      try {
+        setRedeemCode('')
+        setModal({ step: 'waiting', afterClose: { type: 'redeem', target } })
+        await window.electronAPI.payment.openCheckout(LDXP_PAYMENT_URL)
+      } catch {
+        setModal({ step: 'error', message: t.plan.checkoutError })
+      } finally {
+        setCheckoutLoading(null)
+      }
+      return
+    }
+
+    const provider = 'HELIO'
     const productType = modal.target === 'activation' ? 'AI_ACTIVATION' : PLAN_TO_PRODUCT[modal.target as PlanId]
     setCheckoutLoading(method)
     try {
@@ -359,13 +382,8 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
         if (data.checkoutUrl) {
           track(EVENTS.CHECKOUT_CREATED, { provider, productType, existing: !!data.existing })
           onRefresh()
-          if (method === 'crypto') {
-            window.open(data.checkoutUrl, '_blank')
-            setModal(null)
-          } else {
-            setModal({ step: 'waiting' })
-            await window.electronAPI.payment.openCheckout(data.checkoutUrl)
-          }
+          window.open(data.checkoutUrl, '_blank')
+          setModal(null)
         } else {
           setModal({ step: 'error', message: t.plan.checkoutError })
         }

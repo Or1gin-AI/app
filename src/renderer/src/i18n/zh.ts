@@ -273,8 +273,8 @@ export const zh = {
     // Payment
     paymentTitle: '选择支付方式',
     paymentDesc: '请选择您偏好的支付渠道',
-    payStripe: 'Stripe',
-    payStripeDesc: '信用卡 / 借记卡',
+    payStripe: '微信 / 支付宝',
+    payStripeDesc: '扫码支付后，输入邮箱收到的卡密激活',
     payCrypto: 'Crypto',
     payCryptoDesc: '加密货币支付',
     payRedeem: '卡密兑换',

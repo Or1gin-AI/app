@@ -273,8 +273,8 @@ export const en = {
     // Payment
     paymentTitle: 'Payment Method',
     paymentDesc: 'Select your preferred payment method',
-    payStripe: 'Stripe',
-    payStripeDesc: 'Credit / debit card',
+    payStripe: 'WeChat / Alipay',
+    payStripeDesc: 'Pay by QR, then enter the code sent to your email',
     payCrypto: 'Crypto',
     payCryptoDesc: 'Cryptocurrency',
     payRedeem: 'Redeem Code',
