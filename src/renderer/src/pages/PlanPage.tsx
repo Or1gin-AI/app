@@ -21,6 +21,13 @@ const PLAN_TIERS: Record<PlanId, number> = { free: 0, standard: 1, pro: 2, enter
 
 const PLAN_PRICES: Record<PlanId, number> = { free: 0, standard: 10, pro: 10, enterprise: 25 }
 
+const PRODUCT_LIST_PRICE_CENTS: Record<string, number> = {
+  STANDARD: 1000,
+  PRO: 1000,
+  ENTERPRISE: 2500,
+  AI_ACTIVATION: 3000,
+}
+
 const PLAN_TO_PRODUCT: Record<PlanId, string> = {
   free: 'FREE',
   standard: 'STANDARD',
@@ -235,6 +242,52 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
   type Order = { id: string; productType: string; orderType: string; price: number; currency: string; status: string; paymentProvider: string; createdAt: string }
   const [orders, setOrders] = useState<Order[]>([])
   const [ordersLoading, setOrdersLoading] = useState(true)
+
+  // Invoice modal
+  const [invoiceModal, setInvoiceModal] = useState<{ orderId: string } | null>(null)
+  const [invoiceName, setInvoiceName] = useState('')
+  const [invoiceEmail, setInvoiceEmail] = useState('')
+  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false)
+  const [invoiceError, setInvoiceError] = useState<string | null>(null)
+  const [invoiceSuccess, setInvoiceSuccess] = useState(false)
+
+  const openInvoiceModal = useCallback((orderId: string) => {
+    setInvoiceModal({ orderId })
+    setInvoiceName('')
+    setInvoiceEmail(userEmail || '')
+    setInvoiceError(null)
+    setInvoiceSuccess(false)
+    setInvoiceSubmitting(false)
+  }, [userEmail])
+
+  const closeInvoiceModal = useCallback(() => {
+    if (invoiceSubmitting) return
+    setInvoiceModal(null)
+    setInvoiceError(null)
+    setInvoiceSuccess(false)
+  }, [invoiceSubmitting])
+
+  const handleSendInvoice = useCallback(async () => {
+    if (!invoiceModal) return
+    const name = invoiceName.trim()
+    const email = invoiceEmail.trim()
+    if (!name || !email) return
+    setInvoiceSubmitting(true)
+    setInvoiceError(null)
+    try {
+      const res = await window.electronAPI.payment.emailInvoice(invoiceModal.orderId, name, email)
+      if (res.status >= 200 && res.status < 300) {
+        setInvoiceSuccess(true)
+      } else {
+        const errData = res.data as { message?: string } | undefined
+        setInvoiceError(typeof errData === 'object' && errData?.message ? errData.message : t.plan.invoiceModalError)
+      }
+    } catch {
+      setInvoiceError(t.plan.invoiceModalError)
+    } finally {
+      setInvoiceSubmitting(false)
+    }
+  }, [invoiceModal, invoiceName, invoiceEmail, t])
 
   useEffect(() => {
     setOrdersLoading(true)
@@ -605,6 +658,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                     <th className="text-right py-2.5 px-4 font-normal">{t.plan.orderAmount}</th>
                     <th className="text-left py-2.5 px-4 font-normal">{t.plan.orderProvider}</th>
                     <th className="text-right py-2.5 px-4 font-normal">{t.plan.orderStatus}</th>
+                    <th className="text-right py-2.5 px-4 font-normal">{t.plan.orderActions}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -612,7 +666,11 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                     <tr key={order.id} className="border-b border-border last:border-b-0">
                       <td className="py-2.5 px-4 text-text-secondary">{order.createdAt.split('T')[0]}</td>
                       <td className="py-2.5 px-4 text-text">{t.plan.productTypes[order.productType] || order.productType}</td>
-                      <td className="py-2.5 px-4 text-text text-right">${(order.price / 100).toFixed(2)}</td>
+                      <td className="py-2.5 px-4 text-text text-right">${((
+                        order.paymentProvider === 'REDEEM_CODE' && order.price === 0
+                          ? (PRODUCT_LIST_PRICE_CENTS[order.productType] ?? 0)
+                          : order.price
+                      ) / 100).toFixed(2)}</td>
                       <td className="py-2.5 px-4 text-text-secondary text-[12px]">{
                         order.paymentProvider === 'LEMONSQUEEZY' ? 'Stripe' :
                         order.paymentProvider === 'HELIO' ? 'Crypto' :
@@ -629,6 +687,18 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                         }`}>
                           {t.plan.orderStatuses[order.status] || order.status}
                         </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-right">
+                        {order.status === 'COMPLETED' ? (
+                          <button
+                            onClick={() => openInvoiceModal(order.id)}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-border-strong text-text-muted hover:text-brand hover:border-brand/40 cursor-pointer transition-colors"
+                          >
+                            {t.plan.openInvoice}
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-text-faint">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -925,6 +995,75 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
               </>
             )}
 
+          </div>
+        </div>
+      )}
+
+      {/* Invoice modal */}
+      {invoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-bg rounded-xl border border-border shadow-lg w-[380px] p-6">
+            <h3 className="font-serif text-base text-text mb-2">{t.plan.invoiceModalTitle}</h3>
+            <p className="text-[12px] text-text-muted mb-4 leading-relaxed">{t.plan.invoiceModalDesc}</p>
+
+            {invoiceSuccess ? (
+              <>
+                <p className="text-sm text-green-600 mb-5">{t.plan.invoiceModalSuccess}</p>
+                <button
+                  onClick={closeInvoiceModal}
+                  className="w-full py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity"
+                >
+                  {t.plan.ok}
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="mb-3">
+                  <label className="block text-[11px] text-text-faint font-mono mb-1.5">{t.plan.invoiceModalName}</label>
+                  <input
+                    type="text"
+                    value={invoiceName}
+                    onChange={(e) => setInvoiceName(e.target.value)}
+                    placeholder={t.plan.invoiceModalNamePlaceholder}
+                    disabled={invoiceSubmitting}
+                    maxLength={120}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-bg text-sm text-text outline-none focus:border-brand/50 disabled:opacity-60"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-[11px] text-text-faint font-mono mb-1.5">{t.plan.invoiceModalEmail}</label>
+                  <input
+                    type="email"
+                    value={invoiceEmail}
+                    onChange={(e) => setInvoiceEmail(e.target.value)}
+                    placeholder={t.plan.invoiceModalEmailPlaceholder}
+                    disabled={invoiceSubmitting}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-bg text-sm text-text outline-none focus:border-brand/50 disabled:opacity-60"
+                  />
+                </div>
+
+                {invoiceError && (
+                  <p className="text-[12px] text-red-500 mb-3">{invoiceError}</p>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={closeInvoiceModal}
+                    disabled={invoiceSubmitting}
+                    className="flex-1 py-2 rounded-lg text-sm border border-border text-text-muted cursor-pointer hover:bg-bg-card transition-colors disabled:opacity-60"
+                  >
+                    {t.plan.invoiceModalCancel}
+                  </button>
+                  <button
+                    onClick={handleSendInvoice}
+                    disabled={invoiceSubmitting || !invoiceName.trim() || !invoiceEmail.trim()}
+                    className="flex-1 py-2 rounded-lg text-sm bg-brand text-white cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {invoiceSubmitting ? t.plan.invoiceModalSending : t.plan.invoiceModalSend}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

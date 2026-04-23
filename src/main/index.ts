@@ -877,6 +877,10 @@ ipcMain.handle('payment:cancel-subscription', async (_e, claudeAccountId: string
   return authFetch('POST', '/api/payment/cancel-subscription', { claude_account_id: claudeAccountId })
 })
 
+ipcMain.handle('payment:email-invoice', async (_e, orderId: string, name: string, email: string) => {
+  return authFetch('POST', `/api/invoice/${encodeURIComponent(orderId)}/email`, { name, email })
+})
+
 // Telemetry
 ipcMain.handle('telemetry:is-disabled', () => TELEMETRY_DISABLED)
 
@@ -1264,8 +1268,8 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Start auto-updater (skip in dev; skip on macOS — no code signing certificate)
-  if (!is.dev && process.platform !== 'darwin') {
+  // Start auto-updater (skip in dev)
+  if (!is.dev) {
     setupAutoUpdater()
   }
 
