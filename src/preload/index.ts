@@ -81,6 +81,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verify: () => ipcRenderer.invoke('sidecar:verify'),
     proxyStatus: () => ipcRenderer.invoke('sidecar:proxy-status')
   },
+  phoneGateway: {
+    enable: () => ipcRenderer.invoke('phone-gateway:enable'),
+    disable: () => ipcRenderer.invoke('phone-gateway:disable'),
+    status: () => ipcRenderer.invoke('phone-gateway:status'),
+    qrPayload: () => ipcRenderer.invoke('phone-gateway:qr-payload'),
+    onExpired: (cb: () => void) => {
+      const handler = () => cb()
+      ipcRenderer.on('phone-gateway:expired', handler)
+      return () => ipcRenderer.removeListener('phone-gateway:expired', handler)
+    },
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (settings: {

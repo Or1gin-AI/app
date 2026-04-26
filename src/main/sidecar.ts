@@ -7,7 +7,17 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
 const LOCAL_HTTP_PORT = 21911
 const LOCAL_SOCKS_PORT = 21910
 const LOCAL_PORT = LOCAL_HTTP_PORT
+export const PHONE_GATEWAY_PORT = 21912
 const DEFAULT_PRE_PROXY = '127.0.0.1:7890'
+
+export interface PhoneGatewayConfig {
+  host: string
+  port: number
+  user: string
+  pass: string
+  expiresAt: string
+  deviceName: string
+}
 
 // Callback for when sidecar crashes after successful start
 let onCrashCallback: ((reason: string) => void) | null = null
@@ -52,7 +62,8 @@ function generateConfig(
   proxyPassword: string,
   preProxyHost?: string,
   preProxyPort?: number,
-  preProxyProtocol: UpstreamProtocol = 'http'
+  preProxyProtocol: UpstreamProtocol = 'http',
+  phoneGateway?: PhoneGatewayConfig | null
 ): object {
   const usePreProxy = preProxyHost && preProxyPort
   const preProxySettings = usePreProxy
@@ -190,6 +201,41 @@ function generateConfig(
     },
   ]
 
+  const inbounds: Record<string, unknown>[] = [
+    {
+      tag: 'socks-in',
+      port: LOCAL_SOCKS_PORT,
+      listen: '127.0.0.1',
+      protocol: 'socks',
+      settings: { udp: true },
+    },
+    {
+      tag: 'http-in',
+      port: LOCAL_HTTP_PORT,
+      listen: '127.0.0.1',
+      protocol: 'http',
+    },
+  ]
+
+  if (phoneGateway) {
+    inbounds.push({
+      tag: 'phone-gateway-in',
+      port: phoneGateway.port,
+      listen: phoneGateway.host,
+      protocol: 'socks',
+      settings: {
+        auth: 'password',
+        udp: true,
+        accounts: [
+          {
+            user: phoneGateway.user,
+            pass: phoneGateway.pass,
+          },
+        ],
+      },
+    })
+  }
+
   return {
     log: { loglevel: 'info' },
     dns: {
@@ -202,21 +248,7 @@ function generateConfig(
         'localhost',
       ],
     },
-    inbounds: [
-      {
-        tag: 'socks-in',
-        port: LOCAL_SOCKS_PORT,
-        listen: '127.0.0.1',
-        protocol: 'socks',
-        settings: { udp: true },
-      },
-      {
-        tag: 'http-in',
-        port: LOCAL_HTTP_PORT,
-        listen: '127.0.0.1',
-        protocol: 'http',
-      },
-    ],
+    inbounds,
     outbounds,
     routing: {
       domainStrategy: 'IPIfNonMatch',
@@ -238,11 +270,15 @@ function probePort(port: number): Promise<boolean> {
   })
 }
 
-export async function startSidecar(proxyPassword: string, _preProxy?: string): Promise<{ ok: boolean; error?: string }> {
+export async function startSidecar(
+  proxyPassword: string,
+  _preProxy?: string,
+  phoneGateway?: PhoneGatewayConfig | null
+): Promise<{ ok: boolean; error?: string }> {
   await stopSidecar()
   sidecarStopping = false
 
-  const config = generateConfig(proxyPassword)
+  const config = generateConfig(proxyPassword, undefined, undefined, 'http', phoneGateway)
   const configDir = getConfigDir()
   const configPath = join(configDir, 'config.json')
   writeFileSync(configPath, JSON.stringify(config, null, 2))
@@ -407,14 +443,6 @@ export async function stopSidecar(): Promise<void> {
 
 export function isSidecarRunning(): boolean {
   return sidecarProcess !== null && !sidecarProcess.killed
-}
-
-/** Hot-update the proxy password: rewrite config + restart Xray (~1s, seamless) */
-export async function updateOutboundPassword(password: string): Promise<{ ok: boolean; error?: string }> {
-  if (!isSidecarRunning()) return { ok: false, error: 'Xray not running' }
-
-  console.log('[xray] updating password, restarting...')
-  return startSidecar(password)
 }
 
 /** Kill any orphaned xray processes left from a previous crash */

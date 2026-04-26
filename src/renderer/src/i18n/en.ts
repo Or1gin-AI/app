@@ -181,6 +181,18 @@ export const en = {
       step3: 'Browser opens authorization page',
       step4: 'Return to terminal after authorization',
     },
+    phoneGateway: {
+      title: 'Phone Gateway',
+      desc: 'Let your Android phone route through this computer after scanning.',
+      enable: 'Enable Gateway',
+      enabling: 'Enabling...',
+      disable: 'Disable',
+      scan: 'Scan with the Android app',
+      endpoint: 'Computer address',
+      expires: 'Expires',
+      requiresNetwork: 'Finish network optimization before enabling phone gateway.',
+      error: 'Could not enable gateway. Please try again.',
+    },
   },
   networkStatus: {
     title: 'Network Optimized',

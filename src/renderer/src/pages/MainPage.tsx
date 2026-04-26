@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import QRCode from 'qrcode'
 import { useLocale } from '@/i18n/context'
 import { SmsActivationCard } from '@/components/SmsActivationCard'
 
@@ -17,6 +18,150 @@ const tabTransition = {
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -6 },
   transition: { duration: 0.2 },
+}
+
+interface GatewayInfo {
+  lanHost: string
+  port: number
+  expiresAt: string
+}
+
+function PhoneGatewayInline() {
+  const { t } = useLocale()
+  const [busy, setBusy] = useState(false)
+  const [enabled, setEnabled] = useState(false)
+  const [gateway, setGateway] = useState<GatewayInfo | null>(null)
+  const [payload, setPayload] = useState<string | null>(null)
+  const [qr, setQr] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    window.electronAPI.phoneGateway.status().then((status) => {
+      setEnabled(status.enabled)
+      setGateway(status.gateway ?? null)
+      setPayload(status.payload ?? null)
+    }).catch(() => {})
+    return window.electronAPI.phoneGateway.onExpired(() => {
+      setEnabled(false)
+      setGateway(null)
+      setPayload(null)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!payload) {
+      setQr('')
+      return
+    }
+    QRCode.toDataURL(payload, {
+      margin: 1,
+      width: 240,
+      color: { dark: '#2c2520', light: '#ffffff' },
+    }).then(setQr).catch(() => setQr(''))
+  }, [payload])
+
+  const errorText = (code?: string) => {
+    if (code === 'network-not-ready') return t.main.phoneGateway.requiresNetwork
+    return t.main.phoneGateway.error
+  }
+
+  const enableGateway = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await window.electronAPI.phoneGateway.enable()
+      if (!result.ok) {
+        setError(errorText(result.error))
+        return
+      }
+      setEnabled(true)
+      setGateway(result.gateway ?? null)
+      setPayload(result.payload ?? null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const disableGateway = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await window.electronAPI.phoneGateway.disable()
+      if (!result.ok) {
+        setError(errorText(result.error))
+        return
+      }
+      setEnabled(false)
+      setGateway(null)
+      setPayload(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const expires = gateway?.expiresAt
+    ? new Date(gateway.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : ''
+
+  if (!enabled) {
+    return (
+      <div className="mt-2">
+        <button
+          onClick={enableGateway}
+          disabled={busy}
+          className="w-full py-2 rounded-lg text-[12px] font-medium border border-border text-text-secondary bg-transparent hover:text-text hover:bg-bg-alt cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-default"
+        >
+          {busy ? t.main.phoneGateway.enabling : t.main.phoneGateway.scan}
+        </button>
+        {error && <div className="text-[11px] leading-snug text-red-500 mt-2">{error}</div>}
+      </div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      className="mt-3 rounded-xl border border-green-200 bg-green-50/50 p-4"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-[13px] font-semibold text-text">{t.main.phoneGateway.title}</div>
+          <div className="text-[11px] text-text-muted leading-snug mt-0.5">{t.main.phoneGateway.desc}</div>
+        </div>
+        <button
+          onClick={disableGateway}
+          disabled={busy}
+          className="shrink-0 px-3 py-1 rounded-lg border border-border text-[12px] text-text-secondary hover:text-text hover:bg-white cursor-pointer transition-colors disabled:opacity-60"
+        >
+          {t.main.phoneGateway.disable}
+        </button>
+      </div>
+
+      {qr && (
+        <div className="flex justify-center mb-3">
+          <div className="rounded-lg border border-border bg-white p-2 w-[180px]">
+            <img src={qr} alt={t.main.phoneGateway.scan} className="w-full block" />
+          </div>
+        </div>
+      )}
+
+      {gateway && (
+        <div className="space-y-1.5 text-[11px] text-text-secondary">
+          <div className="flex justify-between gap-3">
+            <span className="text-text-muted">{t.main.phoneGateway.endpoint}</span>
+            <span className="font-mono text-text">{gateway.lanHost}:{gateway.port}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-text-muted">{t.main.phoneGateway.expires}</span>
+            <span className="font-mono text-text">{expires}</span>
+          </div>
+        </div>
+      )}
+
+      {error && <div className="text-[11px] leading-snug text-red-500 mt-2">{error}</div>}
+    </motion.div>
+  )
 }
 
 export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPageProps) {
@@ -68,11 +213,13 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
           </button>
         </div>
 
-        <SmsActivationCard
-          claudeAccountId={claudeAccountId}
-          hasPaidPlan={hasPaidPlan}
-          networkOk={networkOk}
-        />
+        <div className="flex items-center gap-2">
+          <SmsActivationCard
+            claudeAccountId={claudeAccountId}
+            hasPaidPlan={hasPaidPlan}
+            networkOk={networkOk}
+          />
+        </div>
       </div>
 
       {/* Content area */}
@@ -107,6 +254,8 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
               >
                 {t.main.claudeWeb.noGmailButton}
               </button>
+
+              <PhoneGatewayInline />
 
             </motion.div>
           ) : (
