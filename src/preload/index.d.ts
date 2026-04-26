@@ -105,9 +105,9 @@ declare global {
         proxyStatus: () => Promise<{ running: boolean; port: number; preProxy: string | null }>
       }
       phoneGateway: {
-        enable: () => Promise<{ ok: boolean; error?: string; gateway?: PhoneGatewayInfo; payload?: string | null }>
+        enable: () => Promise<{ ok: boolean; error?: string; gateway?: PhoneGatewayInfo; payload?: string | null; clashPayload?: string | null }>
         disable: () => Promise<{ ok: boolean; error?: string }>
-        status: () => Promise<{ enabled: boolean; running: boolean; gateway?: PhoneGatewayInfo | null; payload?: string | null }>
+        status: () => Promise<{ enabled: boolean; running: boolean; gateway?: PhoneGatewayInfo | null; payload?: string | null; clashPayload?: string | null }>
         qrPayload: () => Promise<string | null>
         onExpired: (cb: () => void) => () => void
       }
