@@ -608,6 +608,22 @@ function expireSession(reason: string): void {
   sessionToken = null
   sessionUser = undefined
   clearSession()
+
+  // Stop proxy in main process — don't rely on renderer which may not exist (macOS)
+  proxyCredentials = null
+  stopProxyMonitor()
+  stopProxyHealthCheck()
+  stopHelper()
+  void stopSidecar().then(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.session.setProxy({ mode: 'direct' }).catch(() => {})
+      }
+    }
+    clearSystemProxy().catch(() => {})
+    clearShellProxy()
+  })
+
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send('session:expired')
@@ -670,10 +686,9 @@ function stopSessionCheck(): void {
 ipcMain.handle('session:start-check', () => { startSessionCheck(); return { ok: true } })
 ipcMain.handle('session:stop-check', () => { stopSessionCheck(); return { ok: true } })
 ipcMain.handle('session:acknowledge-kick', () => {
-  if (kickGraceTimer) {
-    clearTimeout(kickGraceTimer)
-    kickGraceTimer = null
-  }
+  if (!kickGraceTimer) return { ok: true }
+  clearTimeout(kickGraceTimer)
+  kickGraceTimer = null
   expireSession('Kicked by another device (user acknowledged)')
   return { ok: true }
 })
@@ -1167,10 +1182,23 @@ function stopProxyMonitor(): void {
 }
 
 async function runProxyHealthCheck(source?: string): Promise<void> {
-  if (proxyHealthCheckInFlight || !isSidecarRunning() || !proxyCredentials) return
+  if (proxyHealthCheckInFlight || !proxyCredentials) return
 
   proxyHealthCheckInFlight = true
   try {
+    if (!isSidecarRunning()) {
+      // Xray crashed — restart with same key
+      console.log(`[health-check] sidecar not running (${source || 'periodic'}), restarting with same key`)
+      const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig)
+      if (result.ok) {
+        await applyRendererProxy()
+        await setSystemProxy().catch(() => {})
+        setShellProxy()
+        startHelper()
+      }
+      return
+    }
+
     const verification = await verifySidecar()
     if (!verification.ok && proxyCredentials) {
       console.log(`[health-check] verification failed (${source || 'periodic'}), restarting with same key`)

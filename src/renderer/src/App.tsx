@@ -201,6 +201,7 @@ function App(): React.JSX.Element {
   const logoutRef = useRef<((skipSignOut?: boolean) => void) | null>(null)
   useEffect(() => {
     const cleanup = window.electronAPI.session.onExpired(() => {
+      setKickedInfo(null)
       logoutRef.current?.(true) // skip signOut since session is already dead
     })
     return cleanup
