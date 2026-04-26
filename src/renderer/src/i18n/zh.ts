@@ -181,6 +181,18 @@ export const zh = {
       step3: '浏览器自动打开授权页面',
       step4: '授权完成后返回终端即可',
     },
+    phoneGateway: {
+      title: '手机网关',
+      desc: '让安卓手机扫码后通过这台电脑出网。',
+      enable: '开启网关',
+      enabling: '开启中...',
+      disable: '关闭',
+      scan: '用安卓 App 扫码连接',
+      endpoint: '电脑地址',
+      expires: '有效期',
+      requiresNetwork: '请先完成网络优化，再开启手机网关。',
+      error: '网关开启失败，请稍后重试。',
+    },
   },
   networkStatus: {
     title: '网络优化正常',

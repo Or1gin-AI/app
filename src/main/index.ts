@@ -1,12 +1,14 @@
 import { app, shell, BrowserWindow, nativeImage, ipcMain, dialog } from 'electron'
 import { join } from 'path'
+import { hostname, networkInterfaces } from 'os'
+import { randomBytes } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, updateOutboundPassword, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, PHONE_GATEWAY_PORT, type PhoneGatewayConfig } from './sidecar'
 
 const API_BASE = process.env.ORIGINAI_API_BASE || process.env.API_BASE || 'https://dev.originai.cc'
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
@@ -976,6 +978,77 @@ ipcMain.handle('ticket:comment', async (_e, ticketId: string, content: string) =
 let proxyCredentials: { username: string; password: string; expireAt: string } | null = null
 let currentPreProxy: string | null = null // e.g. '127.0.0.1:7890' or null if direct
 let proxyRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let phoneGatewayConfig: PhoneGatewayConfig | null = null
+let phoneGatewayExpiryTimer: ReturnType<typeof setTimeout> | null = null
+
+function getPrimaryLanIp(): string {
+  const nets = networkInterfaces()
+  const candidates: string[] = []
+  for (const entries of Object.values(nets)) {
+    for (const item of entries ?? []) {
+      if (item.family === 'IPv4' && !item.internal && !item.address.startsWith('169.254.')) {
+        candidates.push(item.address)
+      }
+    }
+  }
+  return candidates[0] ?? '127.0.0.1'
+}
+
+function createPhoneGatewayConfig(): PhoneGatewayConfig {
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
+  return {
+    host: '0.0.0.0',
+    port: PHONE_GATEWAY_PORT,
+    user: 'originai',
+    pass: randomBytes(18).toString('base64url'),
+    expiresAt,
+    deviceName: hostname() || 'OriginAI Desktop',
+  }
+}
+
+function publicPhoneGatewayConfig(): (PhoneGatewayConfig & { lanHost: string }) | null {
+  if (!phoneGatewayConfig) return null
+  return { ...phoneGatewayConfig, lanHost: getPrimaryLanIp() }
+}
+
+function phoneGatewayPayload(): string | null {
+  const cfg = publicPhoneGatewayConfig()
+  if (!cfg) return null
+  const params = new URLSearchParams({
+    host: cfg.lanHost,
+    port: String(cfg.port),
+    protocol: 'socks5',
+    user: cfg.user,
+    pass: cfg.pass,
+    expiresAt: cfg.expiresAt,
+    device: cfg.deviceName,
+  })
+  return `originai://gateway?${params.toString()}`
+}
+
+async function applyRendererProxy(): Promise<void> {
+  const port = getLocalPort()
+  for (const win of BrowserWindow.getAllWindows()) {
+    await win.webContents.session.setProxy({
+      proxyRules: `http://127.0.0.1:${port}`
+    })
+  }
+}
+
+function schedulePhoneGatewayExpiry(): void {
+  if (phoneGatewayExpiryTimer) clearTimeout(phoneGatewayExpiryTimer)
+  if (!phoneGatewayConfig) return
+  const delay = Math.max(new Date(phoneGatewayConfig.expiresAt).getTime() - Date.now(), 0)
+  phoneGatewayExpiryTimer = setTimeout(() => {
+    phoneGatewayConfig = null
+    broadcast('phone-gateway:expired', {})
+    if (proxyCredentials && isSidecarRunning()) {
+      void startSidecar(proxyCredentials.password).then((result) => {
+        if (result.ok) void applyRendererProxy()
+      })
+    }
+  }, delay)
+}
 
 function scheduleProxyRefresh(): void {
   if (proxyRefreshTimer) clearTimeout(proxyRefreshTimer)
@@ -994,9 +1067,13 @@ function scheduleProxyRefresh(): void {
         console.log('[proxy-auth] credentials refreshed, new expiry:', data.expireAt)
         console.log("[proxy-auth] credentials refreshed, new password:", data.password)
 
-        // Update xray password if running
+        // Update xray password if running, preserving the optional phone gateway inbound.
         if (isSidecarRunning()) {
-          await updateOutboundPassword(data.password)
+          const result = await startSidecar(data.password, undefined, phoneGatewayConfig)
+          if (result.ok) {
+            await applyRendererProxy()
+            startHelper()
+          }
         }
         scheduleProxyRefresh()
       }
@@ -1054,14 +1131,9 @@ ipcMain.handle('sidecar:start', async () => {
   console.log('[proxy-auth] got credentials, expires:', creds.expireAt, 'password:', creds.password)
 
   currentPreProxy = null
-  const result = await startSidecar(creds.password)
+  const result = await startSidecar(creds.password, undefined, phoneGatewayConfig)
   if (result.ok) {
-    const port = getLocalPort()
-    for (const win of BrowserWindow.getAllWindows()) {
-      await win.webContents.session.setProxy({
-        proxyRules: `http://127.0.0.1:${port}`
-      })
-    }
+    await applyRendererProxy()
     await setSystemProxy().catch(() => {})
     setShellProxy()
     scheduleProxyRefresh()
@@ -1075,6 +1147,8 @@ ipcMain.handle('sidecar:stop', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
   proxyCredentials = null
   currentPreProxy = null
+  phoneGatewayConfig = null
+  if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopProxyMonitor()
   stopHelper()
   await stopSidecar()
@@ -1099,6 +1173,56 @@ ipcMain.handle('sidecar:verify', async () => {
   // This avoids Windows CONNECT/TLS edge cases when Xray itself is chained through
   // an upstream local HTTP proxy such as Clash on 127.0.0.1:7890.
   return verifySidecar()
+})
+
+ipcMain.handle('phone-gateway:enable', async () => {
+  if (!proxyCredentials || !isSidecarRunning()) {
+    return { ok: false, error: 'network-not-ready' }
+  }
+
+  const nextConfig = createPhoneGatewayConfig()
+  const previousConfig = phoneGatewayConfig
+  phoneGatewayConfig = nextConfig
+  const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig)
+  if (!result.ok) {
+    phoneGatewayConfig = previousConfig
+    if (previousConfig) await startSidecar(proxyCredentials.password, undefined, previousConfig).catch(() => {})
+    return { ok: false, error: result.error || 'enable-failed' }
+  }
+
+  await applyRendererProxy()
+  await setSystemProxy().catch(() => {})
+  setShellProxy()
+  startHelper()
+  schedulePhoneGatewayExpiry()
+  return { ok: true, gateway: publicPhoneGatewayConfig(), payload: phoneGatewayPayload() }
+})
+
+ipcMain.handle('phone-gateway:disable', async () => {
+  phoneGatewayConfig = null
+  if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
+  if (proxyCredentials && isSidecarRunning()) {
+    const result = await startSidecar(proxyCredentials.password)
+    if (!result.ok) return { ok: false, error: result.error || 'disable-failed' }
+    await applyRendererProxy()
+    await setSystemProxy().catch(() => {})
+    setShellProxy()
+    startHelper()
+  }
+  return { ok: true }
+})
+
+ipcMain.handle('phone-gateway:status', () => {
+  return {
+    enabled: Boolean(phoneGatewayConfig),
+    running: isSidecarRunning(),
+    gateway: publicPhoneGatewayConfig(),
+    payload: phoneGatewayPayload(),
+  }
+})
+
+ipcMain.handle('phone-gateway:qr-payload', () => {
+  return phoneGatewayPayload()
 })
 
 // Settings IPC
@@ -1292,6 +1416,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
+  if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopProxyMonitor()
   // Don't stopHelper() here — let helper survive and self-detect:
   // after PID gone, it waits 2s, checks if proxy was already cleared.

@@ -3,6 +3,16 @@ interface AuthResponse {
   data: unknown
 }
 
+interface PhoneGatewayInfo {
+  host: string
+  lanHost: string
+  port: number
+  user: string
+  pass: string
+  expiresAt: string
+  deviceName: string
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -93,6 +103,13 @@ declare global {
         status: () => Promise<{ running: boolean }>
         verify: () => Promise<{ ok: boolean; ip?: string; error?: string }>
         proxyStatus: () => Promise<{ running: boolean; port: number; preProxy: string | null }>
+      }
+      phoneGateway: {
+        enable: () => Promise<{ ok: boolean; error?: string; gateway?: PhoneGatewayInfo; payload?: string | null }>
+        disable: () => Promise<{ ok: boolean; error?: string }>
+        status: () => Promise<{ enabled: boolean; running: boolean; gateway?: PhoneGatewayInfo | null; payload?: string | null }>
+        qrPayload: () => Promise<string | null>
+        onExpired: (cb: () => void) => () => void
       }
       session: {
         startCheck: () => Promise<{ ok: boolean }>
