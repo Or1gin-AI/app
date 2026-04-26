@@ -23,6 +23,8 @@ const tabTransition = {
 interface GatewayInfo {
   lanHost: string
   port: number
+  user: string
+  pass: string
   expiresAt: string
 }
 
@@ -32,7 +34,9 @@ function PhoneGatewayInline() {
   const [enabled, setEnabled] = useState(false)
   const [gateway, setGateway] = useState<GatewayInfo | null>(null)
   const [payload, setPayload] = useState<string | null>(null)
+  const [clashUrl, setClashUrl] = useState<string | null>(null)
   const [qr, setQr] = useState('')
+  const [clashQr, setClashQr] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -40,25 +44,27 @@ function PhoneGatewayInline() {
       setEnabled(status.enabled)
       setGateway(status.gateway ?? null)
       setPayload(status.payload ?? null)
+      setClashUrl(status.clashPayload ?? null)
     }).catch(() => {})
     return window.electronAPI.phoneGateway.onExpired(() => {
       setEnabled(false)
       setGateway(null)
       setPayload(null)
+      setClashUrl(null)
     })
   }, [])
 
   useEffect(() => {
-    if (!payload) {
-      setQr('')
-      return
-    }
-    QRCode.toDataURL(payload, {
-      margin: 1,
-      width: 240,
-      color: { dark: '#2c2520', light: '#ffffff' },
-    }).then(setQr).catch(() => setQr(''))
+    if (!payload) { setQr(''); return }
+    QRCode.toDataURL(payload, { margin: 1, width: 240, color: { dark: '#2c2520', light: '#ffffff' } })
+      .then(setQr).catch(() => setQr(''))
   }, [payload])
+
+  useEffect(() => {
+    if (!clashUrl) { setClashQr(''); return }
+    QRCode.toDataURL(clashUrl, { margin: 1, width: 240, color: { dark: '#2c2520', light: '#ffffff' } })
+      .then(setClashQr).catch(() => setClashQr(''))
+  }, [clashUrl])
 
   const errorText = (code?: string) => {
     if (code === 'network-not-ready') return t.main.phoneGateway.requiresNetwork
@@ -77,6 +83,7 @@ function PhoneGatewayInline() {
       setEnabled(true)
       setGateway(result.gateway ?? null)
       setPayload(result.payload ?? null)
+      setClashUrl(result.clashPayload ?? null)
     } finally {
       setBusy(false)
     }
@@ -111,7 +118,7 @@ function PhoneGatewayInline() {
           disabled={busy}
           className="w-full py-2 rounded-lg text-[12px] font-medium border border-border text-text-secondary bg-transparent hover:text-text hover:bg-bg-alt cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-default"
         >
-          {busy ? t.main.phoneGateway.enabling : t.main.phoneGateway.scan}
+          {busy ? t.main.phoneGateway.enabling : t.main.phoneGateway.buttonLabel}
         </button>
         {error && <div className="text-[11px] leading-snug text-red-500 mt-2">{error}</div>}
       </div>
@@ -124,7 +131,7 @@ function PhoneGatewayInline() {
       animate={{ opacity: 1, height: 'auto' }}
       className="mt-3 rounded-xl border border-green-200 bg-green-50/50 p-4"
     >
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <div>
           <div className="text-[13px] font-semibold text-text">{t.main.phoneGateway.title}</div>
           <div className="text-[11px] text-text-muted leading-snug mt-0.5">{t.main.phoneGateway.desc}</div>
@@ -137,26 +144,63 @@ function PhoneGatewayInline() {
           {t.main.phoneGateway.disable}
         </button>
       </div>
+      <div className="text-[11px] text-amber-600 bg-amber-50 rounded-md px-2.5 py-1.5 mb-3 leading-snug">
+        {t.main.phoneGateway.lanWarning}
+      </div>
 
-      {qr && (
-        <div className="flex justify-center mb-3">
-          <div className="rounded-lg border border-border bg-white p-2 w-[180px]">
-            <img src={qr} alt={t.main.phoneGateway.scan} className="w-full block" />
+      {(qr || clashQr) && (
+        <div className="mb-3">
+          <div className="text-[12px] font-medium text-text mb-2">{t.main.phoneGateway.scan}</div>
+          <div className="flex gap-3">
+            {qr && (
+              <div className="flex-1 text-center">
+                <div className="rounded-lg border border-border bg-white p-2 mx-auto w-[130px]">
+                  <img src={qr} alt="v2ray" className="w-full block" />
+                </div>
+                <div className="text-[11px] text-text-muted mt-1.5 leading-snug">{t.main.phoneGateway.scanApps}</div>
+              </div>
+            )}
+            {clashQr && (
+              <div className="flex-1 text-center">
+                <div className="rounded-lg border border-border bg-white p-2 mx-auto w-[130px]">
+                  <img src={clashQr} alt="clash" className="w-full block" />
+                </div>
+                <div className="text-[11px] text-text-muted mt-1.5 leading-snug">{t.main.phoneGateway.scanAppsClash}</div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {gateway && (
-        <div className="space-y-1.5 text-[11px] text-text-secondary">
-          <div className="flex justify-between gap-3">
-            <span className="text-text-muted">{t.main.phoneGateway.endpoint}</span>
-            <span className="font-mono text-text">{gateway.lanHost}:{gateway.port}</span>
+        <>
+          <div className="text-[11px] text-text-muted mb-1.5">
+            {t.main.phoneGateway.orManual}
+            <span className="text-text-faint ml-1">({t.main.phoneGateway.manualHint})</span>
           </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-text-muted">{t.main.phoneGateway.expires}</span>
-            <span className="font-mono text-text">{expires}</span>
+          <div className="space-y-1 text-[11px] text-text-secondary rounded-lg bg-bg-alt/50 p-2.5">
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">{t.main.phoneGateway.endpoint}</span>
+              <span className="font-mono text-text select-all">{gateway.lanHost}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">{t.main.phoneGateway.port}</span>
+              <span className="font-mono text-text select-all">{gateway.port}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">{t.main.phoneGateway.username}</span>
+              <span className="font-mono text-text select-all">{gateway.user}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">{t.main.phoneGateway.password}</span>
+              <span className="font-mono text-text select-all">{gateway.pass}</span>
+            </div>
+            <div className="flex justify-between gap-3 pt-1 border-t border-border/50">
+              <span className="text-text-muted">{t.main.phoneGateway.expires}</span>
+              <span className="font-mono text-text">{expires}</span>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {error && <div className="text-[11px] leading-snug text-red-500 mt-2">{error}</div>}

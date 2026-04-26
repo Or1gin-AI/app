@@ -1014,16 +1014,55 @@ function publicPhoneGatewayConfig(): (PhoneGatewayConfig & { lanHost: string }) 
 function phoneGatewayPayload(): string | null {
   const cfg = publicPhoneGatewayConfig()
   if (!cfg) return null
-  const params = new URLSearchParams({
-    host: cfg.lanHost,
-    port: String(cfg.port),
-    protocol: 'socks5',
-    user: cfg.user,
-    pass: cfg.pass,
-    expiresAt: cfg.expiresAt,
-    device: cfg.deviceName,
+  const creds = Buffer.from(`${cfg.user}:${cfg.pass}`).toString('base64').replace(/=+$/, '')
+  const remark = encodeURIComponent(cfg.deviceName)
+  return `socks://${creds}@${cfg.lanHost}:${cfg.port}#${remark}`
+}
+
+const CLASH_CONFIG_PORT = PHONE_GATEWAY_PORT + 1 // 21913
+let clashConfigServer: http.Server | null = null
+
+function startClashConfigServer(): void {
+  if (clashConfigServer) return
+  clashConfigServer = http.createServer((_req, res) => {
+    const cfg = publicPhoneGatewayConfig()
+    if (!cfg) { res.writeHead(404); res.end(); return }
+    const yaml = [
+      'proxies:',
+      `  - name: "${cfg.deviceName}"`,
+      '    type: socks5',
+      `    server: ${cfg.lanHost}`,
+      `    port: ${cfg.port}`,
+      `    username: ${cfg.user}`,
+      `    password: "${cfg.pass}"`,
+      '    udp: true',
+      '',
+      'proxy-groups:',
+      '  - name: "OriginAI"',
+      '    type: select',
+      '    proxies:',
+      `      - "${cfg.deviceName}"`,
+      '',
+      'rules:',
+      '  - MATCH,OriginAI',
+    ].join('\n')
+    res.writeHead(200, { 'Content-Type': 'text/yaml; charset=utf-8' })
+    res.end(yaml)
   })
-  return `originai://gateway?${params.toString()}`
+  clashConfigServer.listen(CLASH_CONFIG_PORT, '0.0.0.0')
+  clashConfigServer.on('error', () => {})
+}
+
+function stopClashConfigServer(): void {
+  if (!clashConfigServer) return
+  clashConfigServer.close()
+  clashConfigServer = null
+}
+
+function clashPayload(): string | null {
+  const lanIp = getPrimaryLanIp()
+  if (!phoneGatewayConfig || lanIp === '127.0.0.1') return null
+  return `http://${lanIp}:${CLASH_CONFIG_PORT}`
 }
 
 async function applyRendererProxy(): Promise<void> {
@@ -1041,6 +1080,7 @@ function schedulePhoneGatewayExpiry(): void {
   const delay = Math.max(new Date(phoneGatewayConfig.expiresAt).getTime() - Date.now(), 0)
   phoneGatewayExpiryTimer = setTimeout(() => {
     phoneGatewayConfig = null
+    stopClashConfigServer()
     broadcast('phone-gateway:expired', {})
     if (proxyCredentials && isSidecarRunning()) {
       void startSidecar(proxyCredentials.password).then((result) => {
@@ -1195,11 +1235,13 @@ ipcMain.handle('phone-gateway:enable', async () => {
   setShellProxy()
   startHelper()
   schedulePhoneGatewayExpiry()
-  return { ok: true, gateway: publicPhoneGatewayConfig(), payload: phoneGatewayPayload() }
+  startClashConfigServer()
+  return { ok: true, gateway: publicPhoneGatewayConfig(), payload: phoneGatewayPayload(), clashPayload: clashPayload() }
 })
 
 ipcMain.handle('phone-gateway:disable', async () => {
   phoneGatewayConfig = null
+  stopClashConfigServer()
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   if (proxyCredentials && isSidecarRunning()) {
     const result = await startSidecar(proxyCredentials.password)
@@ -1218,6 +1260,7 @@ ipcMain.handle('phone-gateway:status', () => {
     running: isSidecarRunning(),
     gateway: publicPhoneGatewayConfig(),
     payload: phoneGatewayPayload(),
+    clashPayload: clashPayload(),
   }
 })
 
@@ -1284,9 +1327,8 @@ function setupAutoUpdater(): void {
     broadcast('updater:status', { status: 'error', message: msg })
   })
 
-  // Check once at startup only. In-session updates are not polled —
-  // autoInstallOnAppQuit will apply any downloaded update on next launch.
   autoUpdater.checkForUpdates().catch(() => { })
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 60 * 1000)
 }
 
 function broadcast(channel: string, data: unknown): void {
