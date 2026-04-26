@@ -611,6 +611,10 @@ function expireSession(reason: string): void {
 
   // Stop proxy in main process — don't rely on renderer which may not exist (macOS)
   proxyCredentials = null
+  currentPreProxy = null
+  phoneGatewayConfig = null
+  if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
+  stopClashConfigServer()
   stopProxyMonitor()
   stopProxyHealthCheck()
   stopHelper()
