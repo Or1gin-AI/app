@@ -472,6 +472,12 @@ export const en = {
     detailUpdated: 'Updated',
     detailNoTimeline: 'No activity yet',
   },
+  sessionKicked: {
+    title: 'Logged In Elsewhere',
+    message: 'Your account has been logged in on another device. The proxy will disconnect when the countdown ends.',
+    countdown: 'Disconnecting in',
+    ok: 'OK',
+  },
   brand: {
     name: 'OriginAI',
     taglineCn: '享受极致的AI体验',
