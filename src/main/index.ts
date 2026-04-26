@@ -1155,9 +1155,7 @@ function startProxyMonitor(): void {
   proxyMonitorInterval = setInterval(async () => {
     if (!isSidecarRunning()) return
     const ours = await checkSystemProxy()
-    if (!ours) {
-      broadcast('proxy:conflict', { hijacked: true })
-    }
+    broadcast('proxy:conflict', { hijacked: !ours })
   }, 3000)
 }
 
