@@ -109,6 +109,52 @@ function UpdatePill({ status, version, percent, onDismiss }: { status: string; v
   )
 }
 
+function KickedDialog({ graceMs, onAcknowledge }: { graceMs: number; onAcknowledge: () => void }): React.JSX.Element {
+  const { t } = useLocale()
+  const [remaining, setRemaining] = useState(graceMs)
+
+  useEffect(() => {
+    const start = Date.now()
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - start
+      const left = Math.max(graceMs - elapsed, 0)
+      setRemaining(left)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [graceMs])
+
+  const minutes = Math.floor(remaining / 60000)
+  const seconds = Math.floor((remaining % 60000) / 1000)
+  const timeStr = `${minutes}:${String(seconds).padStart(2, '0')}`
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full mx-4 text-center"
+      >
+        <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
+          <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">{t.sessionKicked.title}</h3>
+        <p className="text-sm text-gray-500 mb-4">{t.sessionKicked.message}</p>
+        <div className="text-[13px] text-text-muted mb-5">
+          {t.sessionKicked.countdown}: <span className="font-mono font-semibold text-amber-600 text-base">{timeStr}</span>
+        </div>
+        <button
+          onClick={onAcknowledge}
+          className="w-full py-2.5 rounded-lg bg-brand text-white font-medium hover:opacity-90 transition-opacity cursor-pointer"
+        >
+          {t.sessionKicked.ok}
+        </button>
+      </motion.div>
+    </div>
+  )
+}
+
 function App(): React.JSX.Element {
   const posthog = usePostHog()
   const [page, setPage] = useState<Page>('loading')
@@ -156,6 +202,15 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const cleanup = window.electronAPI.session.onExpired(() => {
       logoutRef.current?.(true) // skip signOut since session is already dead
+    })
+    return cleanup
+  }, [])
+
+  // Listen for session kicked (grace period before expiry)
+  const [kickedInfo, setKickedInfo] = useState<{ graceMs: number } | null>(null)
+  useEffect(() => {
+    const cleanup = window.electronAPI.session.onKicked((data) => {
+      setKickedInfo({ graceMs: data.graceMs })
     })
     return cleanup
   }, [])
@@ -444,6 +499,15 @@ function App(): React.JSX.Element {
     <LocaleProvider>
       <div className="h-full flex flex-col bg-bg">
         {showUpdateOverlay && <UpdateOverlay status={updateStatus} errorMessage={updateError} />}
+        {kickedInfo && (
+          <KickedDialog
+            graceMs={kickedInfo.graceMs}
+            onAcknowledge={() => {
+              setKickedInfo(null)
+              window.electronAPI.session.acknowledgeKick().catch(() => {})
+            }}
+          />
+        )}
         <AnimatePresence>
           {showUpdatePill && (
             <UpdatePill

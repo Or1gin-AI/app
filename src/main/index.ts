@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, nativeImage, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, nativeImage, ipcMain, dialog, powerMonitor } from 'electron'
 import { join } from 'path'
 import { hostname, networkInterfaces } from 'os'
 import { randomBytes } from 'crypto'
@@ -11,6 +11,8 @@ import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } f
 import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, PHONE_GATEWAY_PORT, type PhoneGatewayConfig } from './sidecar'
 
 const API_BASE = process.env.ORIGINAI_API_BASE || process.env.API_BASE || 'https://dev.originai.cc'
+const PROXY_HEALTH_CHECK_MS = 10 * 60 * 1000
+const PROXY_RESUME_CHECK_DELAY_MS = 5_000
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
 if (!gotSingleInstanceLock) {
@@ -507,6 +509,23 @@ async function fetchExitIpViaProxy(): Promise<string | null> {
   return null
 }
 
+async function fetchProxyIpWithRetry(): Promise<string | null> {
+  const first = await fetchExitIpViaProxy()
+  if (first || !isSidecarRunning() || !proxyCredentials) return first
+
+  // Restart Xray with same key and retry
+  console.log('[proxy] IP check failed, restarting with same key')
+  const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig)
+  if (!result.ok) {
+    console.warn('[proxy] restart failed:', result.error)
+    return null
+  }
+  await applyRendererProxy()
+  startHelper()
+
+  return fetchExitIpViaProxy()
+}
+
 // Full IP check: always direct (used by NetworkSetupPage initial detection)
 ipcMain.handle('check-ip', async () => {
   try {
@@ -525,7 +544,7 @@ ipcMain.handle('check-ip', async () => {
 // Quick IP ping (renderer can call this for lightweight checks)
 ipcMain.handle('check-ip-quick', async () => {
   const running = isSidecarRunning()
-  const ip = running ? await fetchExitIpViaProxy() : null
+  const ip = running ? await fetchProxyIpWithRetry() : null
   return { ok: running && ip !== null, ip }
 })
 
@@ -546,7 +565,7 @@ ipcMain.handle('check-local-ip', async () => {
 
 // Proxy IP: curl through proxy
 ipcMain.handle('check-proxy-ip', async () => {
-  const ip = await fetchExitIpViaProxy()
+  const ip = await fetchProxyIpWithRetry()
   return { ok: ip !== null, ip }
 })
 
@@ -581,6 +600,7 @@ ipcMain.handle('health:stop', () => { stopHealthCheck(); return { ok: true } })
 
 let sessionCheckInterval: ReturnType<typeof setInterval> | null = null
 let sessionCheckInFlight = false
+let kickGraceTimer: ReturnType<typeof setTimeout> | null = null
 
 function expireSession(reason: string): void {
   console.log(`[session] ${reason} — forcing logout`)
@@ -596,6 +616,24 @@ function expireSession(reason: string): void {
   stopSessionCheck()
 }
 
+function handleSessionKicked(): void {
+  if (kickGraceTimer) return // already in grace period
+
+  stopSessionCheck() // stop checking, we already know
+
+  // Notify renderer to show dialog
+  broadcast('session:kicked', {
+    message: 'Your account has been logged in on another device. Proxy will disconnect in 5 minutes.',
+    graceMs: 5 * 60 * 1000
+  })
+
+  // After 5 minutes, do the actual cleanup
+  kickGraceTimer = setTimeout(() => {
+    kickGraceTimer = null
+    expireSession('Kicked by another device (grace period ended)')
+  }, 5 * 60 * 1000)
+}
+
 async function runSessionCheck(): Promise<void> {
   if (sessionCheckInFlight) return
   if (sessionCookies.length === 0 && !sessionToken) return
@@ -604,7 +642,7 @@ async function runSessionCheck(): Promise<void> {
   try {
     const res = await withTimeout(authFetch('GET', '/api/auth/get-session'), 8_000, 'session check')
     if (res.status === 401 || res.status === 403) {
-      expireSession(`Session invalidated (status: ${res.status})`)
+      handleSessionKicked()
     }
   } catch {
     // Network error / timeout — keep the local session and try again later.
@@ -631,6 +669,14 @@ function stopSessionCheck(): void {
 
 ipcMain.handle('session:start-check', () => { startSessionCheck(); return { ok: true } })
 ipcMain.handle('session:stop-check', () => { stopSessionCheck(); return { ok: true } })
+ipcMain.handle('session:acknowledge-kick', () => {
+  if (kickGraceTimer) {
+    clearTimeout(kickGraceTimer)
+    kickGraceTimer = null
+  }
+  expireSession('Kicked by another device (user acknowledged)')
+  return { ok: true }
+})
 
 // Detect system HTTP proxy
 function parseWindowsProxyServer(value: string): { host: string; port: string } | null {
@@ -975,9 +1021,12 @@ ipcMain.handle('ticket:comment', async (_e, ticketId: string, content: string) =
 
 // Sidecar IPC handlers
 // Track proxy credentials and current pre-proxy for auto-refresh / status display
-let proxyCredentials: { username: string; password: string; expireAt: string } | null = null
+type ProxyCredentials = { username: string; password: string }
+let proxyCredentials: ProxyCredentials | null = null
 let currentPreProxy: string | null = null // e.g. '127.0.0.1:7890' or null if direct
-let proxyRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let proxyHealthCheckInterval: ReturnType<typeof setInterval> | null = null
+let proxyHealthCheckInFlight = false
+let proxyLifecycleVersion = 0
 let phoneGatewayConfig: PhoneGatewayConfig | null = null
 let phoneGatewayExpiryTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -1074,6 +1123,14 @@ async function applyRendererProxy(): Promise<void> {
   }
 }
 
+function getResponseMessage(data: unknown, fallback: string): string {
+  if (data && typeof data === 'object' && 'message' in data) {
+    const message = (data as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return fallback
+}
+
 function schedulePhoneGatewayExpiry(): void {
   if (phoneGatewayExpiryTimer) clearTimeout(phoneGatewayExpiryTimer)
   if (!phoneGatewayConfig) return
@@ -1088,43 +1145,6 @@ function schedulePhoneGatewayExpiry(): void {
       })
     }
   }, delay)
-}
-
-function scheduleProxyRefresh(): void {
-  if (proxyRefreshTimer) clearTimeout(proxyRefreshTimer)
-  if (!proxyCredentials) return
-
-  const expireMs = new Date(proxyCredentials.expireAt).getTime() - Date.now()
-  // Refresh 30 minutes before expiry
-  const refreshIn = Math.max(expireMs - 30 * 60 * 1000, 60_000)
-
-  proxyRefreshTimer = setTimeout(async () => {
-    try {
-      const res = await authFetch('GET', '/api/proxy-auth/login')
-      if (res.status === 200) {
-        const data = res.data as { username: string; password: string; expireAt: string }
-        proxyCredentials = data
-        console.log('[proxy-auth] credentials refreshed, new expiry:', data.expireAt)
-        console.log("[proxy-auth] credentials refreshed, new password:", data.password)
-
-        // Update xray password if running, preserving the optional phone gateway inbound.
-        if (isSidecarRunning()) {
-          const result = await startSidecar(data.password, undefined, phoneGatewayConfig)
-          if (result.ok) {
-            await applyRendererProxy()
-            startHelper()
-          }
-        }
-        scheduleProxyRefresh()
-      }
-    } catch (err) {
-      console.error('[proxy-auth] refresh failed:', err)
-      // Retry in 5 minutes
-      proxyRefreshTimer = setTimeout(() => scheduleProxyRefresh(), 5 * 60 * 1000)
-    }
-  }, refreshIn)
-
-  console.log(`[proxy-auth] next refresh in ${Math.round(refreshIn / 60000)} min`)
 }
 
 // --- System proxy monitor (only when optimization active) ---
@@ -1148,27 +1168,55 @@ function stopProxyMonitor(): void {
   }
 }
 
-ipcMain.handle('sidecar:start', async () => {
-  // Clear session proxy so authFetch goes direct (in-memory, no OS network change).
-  // Don't clear system proxy here — it triggers ERR_NETWORK_CHANGED.
-  // System proxy will be overwritten by setSystemProxy() after Xray starts.
-  for (const win of BrowserWindow.getAllWindows()) {
-    await win.webContents.session.setProxy({ mode: 'direct' })
+async function runProxyHealthCheck(source?: string): Promise<void> {
+  if (proxyHealthCheckInFlight || !isSidecarRunning() || !proxyCredentials) return
+
+  proxyHealthCheckInFlight = true
+  try {
+    const verification = await verifySidecar()
+    if (!verification.ok && proxyCredentials) {
+      console.log(`[health-check] verification failed (${source || 'periodic'}), restarting with same key`)
+      const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig)
+      if (result.ok) {
+        await applyRendererProxy()
+        startHelper()
+      }
+    }
+  } catch (err) {
+    console.warn('[health-check] error:', err)
+  } finally {
+    proxyHealthCheckInFlight = false
   }
+}
+
+function startProxyHealthCheck(): void {
+  if (proxyHealthCheckInterval) return
+  proxyHealthCheckInterval = setInterval(() => {
+    void runProxyHealthCheck('periodic')
+  }, PROXY_HEALTH_CHECK_MS)
+}
+
+function stopProxyHealthCheck(): void {
+  if (proxyHealthCheckInterval) {
+    clearInterval(proxyHealthCheckInterval)
+    proxyHealthCheckInterval = null
+  }
+  proxyHealthCheckInFlight = false
+}
+
+ipcMain.handle('sidecar:start', async () => {
+  proxyLifecycleVersion++
 
   const authRes = await authFetch('GET', '/api/proxy-auth/login')
   if (authRes.status !== 200) {
-    const errData = authRes.data as { message?: string } | undefined
     return {
       ok: false,
-      error: typeof errData === 'object' && errData?.message
-        ? errData.message
-        : 'Failed to get proxy credentials'
+      error: getResponseMessage(authRes.data, 'Failed to get proxy credentials')
     }
   }
-  const creds = authRes.data as { username: string; password: string; expireAt: string }
+  const creds = authRes.data as ProxyCredentials
   proxyCredentials = creds
-  console.log('[proxy-auth] got credentials, expires:', creds.expireAt, 'password:', creds.password)
+  console.log('[proxy-auth] got credentials')
 
   currentPreProxy = null
   const result = await startSidecar(creds.password, undefined, phoneGatewayConfig)
@@ -1176,20 +1224,22 @@ ipcMain.handle('sidecar:start', async () => {
     await applyRendererProxy()
     await setSystemProxy().catch(() => {})
     setShellProxy()
-    scheduleProxyRefresh()
     startProxyMonitor()
+    startProxyHealthCheck()
     startHelper()
   }
   return result
 })
 
 ipcMain.handle('sidecar:stop', async () => {
-  if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
+  proxyLifecycleVersion++
+
   proxyCredentials = null
   currentPreProxy = null
   phoneGatewayConfig = null
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopProxyMonitor()
+  stopProxyHealthCheck()
   stopHelper()
   await stopSidecar()
 
@@ -1209,10 +1259,19 @@ ipcMain.handle('sidecar:proxy-status', () => {
 })
 
 ipcMain.handle('sidecar:verify', async () => {
-  // Use the sidecar's own low-level verification path instead of Chromium net.fetch.
-  // This avoids Windows CONNECT/TLS edge cases when Xray itself is chained through
-  // an upstream local HTTP proxy such as Clash on 127.0.0.1:7890.
-  return verifySidecar()
+  const first = await verifySidecar()
+  if (first.ok || !isSidecarRunning() || !proxyCredentials) return first
+
+  // Restart with same key instead of fetching new credentials
+  const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig)
+  if (!result.ok) {
+    return { ok: false, error: result.error || first.error || 'Proxy recovery failed' }
+  }
+  await applyRendererProxy()
+  startHelper()
+
+  const second = await verifySidecar()
+  return second.ok ? second : { ok: false, error: second.error || first.error || 'Proxy verification failed after restart' }
 })
 
 ipcMain.handle('phone-gateway:enable', async () => {
@@ -1234,6 +1293,7 @@ ipcMain.handle('phone-gateway:enable', async () => {
   await setSystemProxy().catch(() => {})
   setShellProxy()
   startHelper()
+  startProxyHealthCheck()
   schedulePhoneGatewayExpiry()
   startClashConfigServer()
   return { ok: true, gateway: publicPhoneGatewayConfig(), payload: phoneGatewayPayload(), clashPayload: clashPayload() }
@@ -1250,6 +1310,7 @@ ipcMain.handle('phone-gateway:disable', async () => {
     await setSystemProxy().catch(() => {})
     setShellProxy()
     startHelper()
+    startProxyHealthCheck()
   }
   return { ok: true }
 })
@@ -1342,7 +1403,10 @@ function broadcast(channel: string, data: unknown): void {
 let updaterInstallInProgress = false
 
 async function runUpdaterInstallCleanup(): Promise<void> {
+  proxyLifecycleVersion++
+
   stopProxyMonitor()
+  stopProxyHealthCheck()
   // Clear shell env synchronously first so a partial quit still restores the terminal.
   clearShellProxy()
 
@@ -1447,6 +1511,18 @@ app.whenReady().then(async () => {
     }
   })
 
+  setTimeout(() => {
+    if (!isSidecarRunning()) return
+    startProxyHealthCheck()
+    void runProxyHealthCheck('startup health check')
+  }, PROXY_RESUME_CHECK_DELAY_MS)
+
+  powerMonitor.on('resume', () => {
+    setTimeout(() => {
+      void runProxyHealthCheck('system resume')
+    }, PROXY_RESUME_CHECK_DELAY_MS)
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -1457,9 +1533,12 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
-  if (proxyRefreshTimer) { clearTimeout(proxyRefreshTimer); proxyRefreshTimer = null }
+  proxyLifecycleVersion++
+
+  if (kickGraceTimer) { clearTimeout(kickGraceTimer); kickGraceTimer = null }
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopProxyMonitor()
+  stopProxyHealthCheck()
   // Don't stopHelper() here — let helper survive and self-detect:
   // after PID gone, it waits 2s, checks if proxy was already cleared.
   // Normal exit: proxy cleared → helper exits silently.

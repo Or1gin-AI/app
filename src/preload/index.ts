@@ -110,6 +110,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('session:expired', handler)
       return () => ipcRenderer.removeListener('session:expired', handler)
     },
+    onKicked: (cb: (data: { message: string; graceMs: number }) => void) => {
+      const handler = (_: unknown, data: { message: string; graceMs: number }) => cb(data)
+      ipcRenderer.on('session:kicked', handler)
+      return () => ipcRenderer.removeListener('session:kicked', handler)
+    },
+    acknowledgeKick: () => ipcRenderer.invoke('session:acknowledge-kick'),
   },
   health: {
     start: () => ipcRenderer.invoke('health:start'),

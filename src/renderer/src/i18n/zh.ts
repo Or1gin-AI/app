@@ -472,6 +472,12 @@ export const zh = {
     detailUpdated: '更新于',
     detailNoTimeline: '暂无动态',
   },
+  sessionKicked: {
+    title: '账号已在其他设备登录',
+    message: '您的账号已在另一台设备登录，倒计时结束后代理将断开连接。',
+    countdown: '断开倒计时',
+    ok: '确定',
+  },
   brand: {
     name: 'OriginAI',
     taglineCn: '享受极致的AI体验',

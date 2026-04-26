@@ -115,6 +115,8 @@ declare global {
         startCheck: () => Promise<{ ok: boolean }>
         stopCheck: () => Promise<{ ok: boolean }>
         onExpired: (cb: () => void) => () => void
+        onKicked: (cb: (data: { message: string; graceMs: number }) => void) => () => void
+        acknowledgeKick: () => Promise<{ ok: boolean }>
       }
       health: {
         start: () => Promise<{ ok: boolean }>
