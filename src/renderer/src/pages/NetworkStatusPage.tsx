@@ -49,8 +49,8 @@ export function NetworkStatusPage({ onBack, onReconfigure }: NetworkStatusPagePr
 
     check()
 
-    const unsub = window.electronAPI.proxy.onConflict(() => {
-      setConflict(true)
+    const unsub = window.electronAPI.proxy.onConflict((data: { hijacked: boolean }) => {
+      setConflict(data.hijacked)
     })
 
     return () => { cancelled = true; unsub() }
