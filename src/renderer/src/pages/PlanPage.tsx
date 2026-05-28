@@ -360,11 +360,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
 
   const handleConfirm = () => {
     if (!modal || modal.step !== 'confirm') return
-    if (currentPlan !== 'free') {
-      setModal({ step: 'override', target: modal.target })
-    } else {
-      setModal({ step: 'payment', target: modal.target })
-    }
+    setModal({ step: 'payment', target: modal.target })
   }
 
   const handleOverrideConfirm = async () => {
