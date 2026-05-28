@@ -6,6 +6,7 @@ interface SmsActivationCardProps {
   claudeAccountId: string
   hasPaidPlan: boolean
   networkOk: boolean
+  target?: 'claude' | 'openai'
 }
 
 type Notice = { type: 'success' | 'error'; message: string } | null
@@ -28,6 +29,7 @@ export function SmsActivationCard({
   claudeAccountId,
   hasPaidPlan,
   networkOk,
+  target = 'claude',
 }: SmsActivationCardProps): React.JSX.Element | null {
   const { t } = useLocale()
   const [notice, setNotice] = useState<Notice>(null)
@@ -102,7 +104,7 @@ export function SmsActivationCard({
     stopSmsPoll()
     smsPollRef.current = setInterval(async () => {
       try {
-        const statusRes = await window.electronAPI.sms.status()
+        const statusRes = await window.electronAPI.sms.status(target)
         if (statusRes.status >= 200 && statusRes.status < 300) {
           const data = statusRes.data as { status: string; code?: string }
           if (data.status === 'CODE_RECEIVED' && data.code) {
@@ -124,7 +126,7 @@ export function SmsActivationCard({
         // Keep polling in background.
       }
     }, 10_000)
-  }, [stopSmsPoll, t])
+  }, [stopSmsPoll, t, target])
 
   const handleActivateEntry = useCallback(async () => {
     setNotice(null)
@@ -143,7 +145,7 @@ export function SmsActivationCard({
     }
 
     try {
-      const existing = await window.electronAPI.sms.phoneNumber()
+      const existing = await window.electronAPI.sms.phoneNumber(target)
       if (existing.status >= 200 && existing.status < 300) {
         const sms = existing.data as SmsData
         setModal({ step: 'activate', phase: 'polling', sms })
@@ -155,21 +157,21 @@ export function SmsActivationCard({
     }
 
     setModal({ step: 'activate-confirm' })
-  }, [hasAccount, hasPaidPlan, networkOk, showNotice, startSmsPoll, t])
+  }, [hasAccount, hasPaidPlan, networkOk, showNotice, startSmsPoll, t, target])
 
   const handleActivateConfirm = useCallback(async () => {
     track(EVENTS.SMS_NUMBER_REQUESTED)
     setModal({ step: 'activate', phase: 'loading', sms: {} })
 
     try {
-      const existing = await window.electronAPI.sms.phoneNumber()
+      const existing = await window.electronAPI.sms.phoneNumber(target)
       let sms: SmsData
       let isNew = false
 
       if (existing.status >= 200 && existing.status < 300) {
         sms = existing.data as SmsData
       } else {
-        const res = await window.electronAPI.sms.requestNumber()
+        const res = await window.electronAPI.sms.requestNumber(target)
         if (res.status < 200 || res.status >= 300) {
           const errData = res.data as { message?: string } | undefined
           setModal({
@@ -192,7 +194,7 @@ export function SmsActivationCard({
     } catch {
       setModal({ step: 'activate', phase: 'error', sms: {}, errorMsg: t.plan.activateError })
     }
-  }, [startSmsPoll, t])
+  }, [startSmsPoll, t, target])
 
   const handleRefreshNumber = useCallback(async () => {
     track(EVENTS.SMS_NUMBER_REFRESHED)
@@ -200,7 +202,7 @@ export function SmsActivationCard({
     setModal({ step: 'activate', phase: 'loading', sms: {} })
 
     try {
-      const res = await window.electronAPI.sms.refreshNumber()
+      const res = await window.electronAPI.sms.refreshNumber(target)
       if (res.status >= 200 && res.status < 300) {
         const sms = res.data as SmsData
         setModal({ step: 'activate', phase: 'polling', sms })
@@ -218,16 +220,16 @@ export function SmsActivationCard({
     } catch {
       setModal({ step: 'activate', phase: 'error', sms: {}, errorMsg: t.plan.activateError })
     }
-  }, [startSmsPoll, stopSmsPoll, t])
+  }, [startSmsPoll, stopSmsPoll, t, target])
 
   const handleRefundNumber = useCallback(async () => {
     track(EVENTS.SMS_REFUNDED)
     stopSmsPoll()
-    await window.electronAPI.sms.refund().catch(() => {})
+    await window.electronAPI.sms.refund(target).catch(() => {})
     setSmsCooldownEnd(0)
     refreshBalance()
     setModal(null)
-  }, [refreshBalance, stopSmsPoll])
+  }, [refreshBalance, stopSmsPoll, target])
 
   const handleActivateClose = useCallback(() => {
     refreshBalance()
@@ -240,7 +242,7 @@ export function SmsActivationCard({
     <>
       <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-card/95 px-4 py-2.5 shadow-sm backdrop-blur-sm">
         <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-text-faint">
-          {t.plan.activationSectionTitle}
+          {target === 'openai' ? 'OpenAI SMS' : t.plan.activationSectionTitle}
         </span>
         <span className="text-sm font-semibold text-text font-mono">
           {activationBalance ?? '—'}
