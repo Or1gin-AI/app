@@ -798,24 +798,6 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
                     )}
                   </button>
                   <button
-                    onClick={() => handlePaymentSelect('crypto')}
-                    disabled={!!checkoutLoading}
-                    className="w-full py-3 rounded-lg text-sm border border-border-strong cursor-pointer hover:border-brand/40 hover:bg-brand/[0.03] transition-colors text-left px-4 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {checkoutLoading === 'crypto' ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-3.5 h-3.5 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
-                        <span className="font-medium text-text">{t.plan.payCrypto}</span>
-                      </span>
-                    ) : (
-                      <>
-                        <span className="font-medium text-text">{t.plan.payCrypto}</span>
-                        <br />
-                        <span className="text-[11px] text-text-faint">{t.plan.payCryptoDesc}</span>
-                      </>
-                    )}
-                  </button>
-                  <button
                     onClick={() => handleOpenRedeem(modal.target)}
                     disabled={!!checkoutLoading}
                     className="w-full py-3 rounded-lg text-sm border border-border-strong cursor-pointer hover:border-brand/40 hover:bg-brand/[0.03] transition-colors text-left px-4 disabled:opacity-50 disabled:cursor-not-allowed"
