@@ -4,7 +4,7 @@ import { useLocale } from '@/i18n/context'
 import { TicketPanel } from '@/components/TicketPanel'
 import { track, EVENTS } from '@/lib/telemetry'
 
-type PlanId = 'free' | 'standard' | 'pro' | 'enterprise'
+type PlanId = 'free' | 'lite' | 'standard' | 'team'
 
 interface PlanPageProps {
   currentPlan: PlanId
@@ -17,29 +17,39 @@ interface PlanPageProps {
   onRefresh: () => Promise<unknown>
 }
 
-const PLAN_TIERS: Record<PlanId, number> = { free: 0, standard: 1, pro: 2, enterprise: 3 }
+const PLAN_TIERS: Record<PlanId, number> = { free: 0, lite: 1, standard: 2, team: 3 }
 
-const PLAN_PRICES: Record<PlanId, number> = { free: 0, standard: 10, pro: 10, enterprise: 25 }
+const PLAN_PRICES: Record<PlanId, number> = { free: 0, lite: 5, standard: 10, team: 20 }
+
+const PLAN_LIST_PRICES: Record<PlanId, number> = { free: 0, lite: 10, standard: 20, team: 40 }
+
+const PLAN_DEVICES: Record<PlanId, number> = { free: 1, lite: 1, standard: 3, team: 6 }
+
+const PLAN_SMS: Record<PlanId, number> = { free: 0, lite: 1, standard: 3, team: 5 }
 
 const PRODUCT_LIST_PRICE_CENTS: Record<string, number> = {
+  LITE: 500,
   STANDARD: 1000,
-  PRO: 1000,
-  ENTERPRISE: 2500,
+  TEAM: 2000,
   AI_ACTIVATION: 3000,
 }
 
 const PLAN_TO_PRODUCT: Record<PlanId, string> = {
   free: 'FREE',
+  lite: 'LITE',
   standard: 'STANDARD',
-  pro: 'PRO',
-  enterprise: 'ENTERPRISE',
+  team: 'TEAM',
 }
 
-const PLAN_ORDER: PlanId[] = ['standard']
+const PLAN_ORDER: PlanId[] = ['lite', 'standard', 'team']
 
 const CURRENCY = '$'
 
-const LDXP_PAYMENT_URL = 'https://pay.ldxp.cn/item/nzcb52'
+const LDXP_PAYMENT_URLS: Record<string, string> = {
+  lite: 'https://pay.ldxp.cn/item/f0dwk6',
+  standard: 'https://pay.ldxp.cn/item/nzcb52',
+  team: 'https://pay.ldxp.cn/item/gmxmq7',
+}
 
 type PaymentTarget = PlanId | 'activation'
 
@@ -400,7 +410,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
       try {
         setRedeemCode('')
         setModal({ step: 'waiting', afterClose: { type: 'redeem', target } })
-        await window.electronAPI.payment.openCheckout(LDXP_PAYMENT_URL)
+        await window.electronAPI.payment.openCheckout(LDXP_PAYMENT_URLS[target as string] || LDXP_PAYMENT_URLS.standard)
       } catch {
         setModal({ step: 'error', message: t.plan.checkoutError })
       } finally {
@@ -479,7 +489,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
-      <div className="max-w-[560px] w-full mx-auto py-8 px-6">
+      <div className="max-w-[780px] w-full mx-auto py-8 px-6">
         {/* Back */}
         {onBack && (
           <button onClick={onBack} className="text-[13px] text-text-muted hover:text-text-secondary cursor-pointer bg-transparent border-none mb-6">
@@ -551,7 +561,7 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
             </button>
           )}
         </div>
-        <div className="flex justify-center">
+        <div className="flex justify-center gap-3">
           {PLAN_ORDER.map((id) => {
             const isCurrent = id === currentPlan
             const price = PLAN_PRICES[id]
@@ -567,24 +577,23 @@ export function PlanPage({ currentPlan, expiresAt, userEmail, claudeAccountId, a
             return (
               <div
                 key={id}
-                className={`rounded-xl border p-4 flex flex-col transition-colors max-w-xs w-full ${
+                className={`rounded-xl border p-4 flex flex-col transition-colors flex-1 min-w-0 ${
                   isCurrent ? 'border-brand bg-brand/[0.04]' : 'border-border bg-bg-card hover:border-brand/40'
                 }`}
               >
                 <p className="text-xs font-mono text-text-faint mb-1 text-center">{planLabel(id)}</p>
                 <div className="flex items-center justify-center gap-2 mb-0.5">
-                  <span className="text-sm text-text-faint line-through">{CURRENCY}20</span>
                   <span className="text-2xl font-semibold text-text">{CURRENCY}{price}</span>
-                  <span className="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded-full font-medium">-50%</span>
                 </div>
-                <p className="text-[10px] text-text-faint text-center mb-3">{t.plan.serviceFee}</p>
+                <p className="text-[10px] text-text-faint text-center mb-1">{t.plan.serviceFee}</p>
+                <p className="text-[11px] text-text-muted text-center mb-3">{PLAN_DEVICES[id]} {t.plan.deviceUnit}</p>
 
                 {/* Features */}
                 <ul className="space-y-1.5 mb-4 text-[11px] text-text-muted">
                   {t.plan.featureList.map((item, idx) => (
                     <li key={idx} className="flex gap-1.5 items-start">
                       <span className="text-brand mt-[2px] shrink-0">✓</span>
-                      <span className="leading-relaxed">{item}</span>
+                      <span className="leading-relaxed">{item.replace('{sms}', String(PLAN_SMS[id]))}</span>
                     </li>
                   ))}
                 </ul>

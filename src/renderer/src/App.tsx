@@ -15,7 +15,7 @@ import type { PlanId } from '@/pages/PlanPage'
 
 type Page = 'loading' | 'login' | 'network' | 'network-status' | 'main' | 'plan'
 
-const PRODUCT_TO_PLAN: Record<string, PlanId> = { FREE: 'free', STANDARD: 'standard', PRO: 'pro', ENTERPRISE: 'enterprise' }
+const PRODUCT_TO_PLAN: Record<string, PlanId> = { FREE: 'free', LITE: 'lite', STANDARD: 'standard', PRO: 'standard', TEAM: 'team' }
 
 const pageTransition = {
   initial: { opacity: 0 },
