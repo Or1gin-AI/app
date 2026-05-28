@@ -7,6 +7,7 @@ import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
 import { net } from 'electron'
 import http from 'node:http'
+import { execFile as cpExecFile } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
 import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, PHONE_GATEWAY_PORT, type PhoneGatewayConfig } from './sidecar'
 
@@ -615,6 +616,7 @@ function expireSession(reason: string): void {
   phoneGatewayConfig = null
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopClashConfigServer()
+  removeFirewallRule()
   stopProxyMonitor()
   stopProxyHealthCheck()
   stopHelper()
@@ -1062,6 +1064,36 @@ function getPrimaryLanIp(): string {
   return candidates[0] ?? '127.0.0.1'
 }
 
+const FIREWALL_RULE_NAME = 'OriginAI Phone Gateway'
+
+function addFirewallRule(port: number): Promise<boolean> {
+  if (process.platform !== 'win32') return Promise.resolve(true)
+  const run = (args: string[]): Promise<void> =>
+    new Promise((resolve, reject) => {
+      cpExecFile('netsh', args, (err) => (err ? reject(err) : resolve()))
+    })
+  return Promise.all([
+    run(['advfirewall', 'firewall', 'add', 'rule', `name=${FIREWALL_RULE_NAME}`, 'dir=in', 'action=allow', `localport=${port}`, 'protocol=TCP']),
+    run(['advfirewall', 'firewall', 'add', 'rule', `name=${FIREWALL_RULE_NAME} UDP`, 'dir=in', 'action=allow', `localport=${port}`, 'protocol=UDP']),
+  ]).then(() => {
+    console.log('[firewall] inbound rules added')
+    return true
+  }).catch((err) => {
+    console.warn('[firewall] failed to add rules:', err.message)
+    return false
+  })
+}
+
+function removeFirewallRule(): void {
+  if (process.platform !== 'win32') return
+  cpExecFile('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${FIREWALL_RULE_NAME}`], (err) => {
+    if (err) console.warn('[firewall] failed to delete TCP rule:', err.message)
+  })
+  cpExecFile('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${FIREWALL_RULE_NAME} UDP`], (err) => {
+    if (err) console.warn('[firewall] failed to delete UDP rule:', err.message)
+  })
+}
+
 function createPhoneGatewayConfig(): PhoneGatewayConfig {
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
   return {
@@ -1326,12 +1358,14 @@ ipcMain.handle('phone-gateway:enable', async () => {
   startProxyHealthCheck()
   schedulePhoneGatewayExpiry()
   startClashConfigServer()
-  return { ok: true, gateway: publicPhoneGatewayConfig(), payload: phoneGatewayPayload(), clashPayload: clashPayload() }
+  const firewallOk = await addFirewallRule(PHONE_GATEWAY_PORT)
+  return { ok: true, firewallFailed: !firewallOk, gateway: publicPhoneGatewayConfig(), payload: phoneGatewayPayload(), clashPayload: clashPayload() }
 })
 
 ipcMain.handle('phone-gateway:disable', async () => {
   phoneGatewayConfig = null
   stopClashConfigServer()
+  removeFirewallRule()
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   if (proxyCredentials && isSidecarRunning()) {
     const result = await startSidecar(proxyCredentials.password)
@@ -1386,7 +1420,10 @@ function setupAutoUpdater(): void {
     broadcast('updater:status', { status: 'checking' })
   })
 
+  let updateDownloading = false
+
   autoUpdater.on('update-available', (info) => {
+    updateDownloading = true
     pendingVersion = info.version
     broadcast('updater:status', { status: 'available', version: info.version })
   })
@@ -1404,6 +1441,7 @@ function setupAutoUpdater(): void {
   })
 
   autoUpdater.on('update-downloaded', (info) => {
+    updateDownloading = false
     pendingVersion = info.version
     broadcast('updater:status', { status: 'downloaded', version: info.version })
   })
@@ -1415,6 +1453,11 @@ function setupAutoUpdater(): void {
       setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 5_000)
       return
     }
+    if (!updateDownloading) {
+      console.warn('[updater] check failed (silent):', msg)
+      return
+    }
+    updateDownloading = false
     broadcast('updater:status', { status: 'error', message: msg })
   })
 
@@ -1573,6 +1616,7 @@ app.on('before-quit', async () => {
   // after PID gone, it waits 2s, checks if proxy was already cleared.
   // Normal exit: proxy cleared → helper exits silently.
   // Crash: proxy still set → helper runs recovery + dialog.
+  removeFirewallRule()
   await clearSystemProxy().catch(() => {})
   await stopSidecar()
 })

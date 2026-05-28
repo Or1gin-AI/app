@@ -16,9 +16,9 @@ interface TitlebarProps {
 
 const PLAN_LABELS: Record<PlanId, string> = {
   free: 'Free',
+  lite: 'Lite',
   standard: 'Standard',
-  pro: 'Pro',
-  enterprise: 'Enterprise',
+  team: 'Team',
 }
 
 export function Titlebar({
@@ -27,7 +27,7 @@ export function Titlebar({
   networkOk = true,
   exitIp,
   userEmail,
-  userPlan = 'pro',
+  userPlan = 'standard',
   onLogout,
   onPlanClick,
   onNetworkClick,

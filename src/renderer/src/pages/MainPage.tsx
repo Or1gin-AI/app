@@ -38,6 +38,7 @@ function PhoneGatewayInline() {
   const [qr, setQr] = useState('')
   const [clashQr, setClashQr] = useState('')
   const [error, setError] = useState('')
+  const [firewallWarning, setFirewallWarning] = useState(false)
 
   useEffect(() => {
     window.electronAPI.phoneGateway.status().then((status) => {
@@ -84,6 +85,7 @@ function PhoneGatewayInline() {
       setGateway(result.gateway ?? null)
       setPayload(result.payload ?? null)
       setClashUrl(result.clashPayload ?? null)
+      setFirewallWarning(result.firewallFailed ?? false)
     } finally {
       setBusy(false)
     }
@@ -144,9 +146,15 @@ function PhoneGatewayInline() {
           {t.main.phoneGateway.disable}
         </button>
       </div>
-      <div className="text-[11px] text-amber-600 bg-amber-50 rounded-md px-2.5 py-1.5 mb-3 leading-snug">
-        {t.main.phoneGateway.lanWarning}
+      <div className="text-[11px] text-amber-600 bg-amber-50 rounded-md px-2.5 py-1.5 mb-3 leading-snug space-y-1">
+        <div>{t.main.phoneGateway.lanWarning}</div>
+        <div>{t.main.phoneGateway.logoutReminder}</div>
       </div>
+      {firewallWarning && (
+        <div className="text-[11px] text-red-600 bg-red-50 rounded-md px-2.5 py-1.5 mb-3 leading-snug">
+          {t.main.phoneGateway.firewallWarning}
+        </div>
+      )}
 
       {(qr || clashQr) && (
         <div className="mb-3">
