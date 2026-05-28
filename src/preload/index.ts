@@ -33,11 +33,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     login: () => ipcRenderer.invoke('proxy-auth:login'),
   },
   sms: {
-    requestNumber: () => ipcRenderer.invoke('sms:request-number'),
-    phoneNumber: () => ipcRenderer.invoke('sms:phone-number'),
-    status: () => ipcRenderer.invoke('sms:status'),
-    refreshNumber: () => ipcRenderer.invoke('sms:refresh-number'),
-    refund: () => ipcRenderer.invoke('sms:refund'),
+    requestNumber: (target?: string) => ipcRenderer.invoke('sms:request-number', target),
+    phoneNumber: (target?: string) => ipcRenderer.invoke('sms:phone-number', target),
+    status: (target?: string) => ipcRenderer.invoke('sms:status', target),
+    refreshNumber: (target?: string) => ipcRenderer.invoke('sms:refresh-number', target),
+    refund: (target?: string) => ipcRenderer.invoke('sms:refund', target),
   },
   payment: {
     checkout: (productType: string, provider?: string, claudeAccountId?: string) =>
@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       autoLaunch: boolean
       savedEmail: string
       savedPassword: string
+      proxyServices: 'claude' | 'chatgpt' | 'both'
     }) => ipcRenderer.invoke('settings:set', settings),
   },
   session: {

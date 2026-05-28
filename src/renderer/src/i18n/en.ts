@@ -104,9 +104,14 @@ export const en = {
     purityProxy: 'VPN / Proxy',
     purityDC: 'Datacenter',
     startOptimize: 'Start Optimization',
+    // Service selection
+    serviceLabel: 'Optimize For',
+    serviceClaude: 'Claude',
+    serviceChatgpt: 'ChatGPT (Codex)',
+    serviceBoth: 'ChatGPT + Claude',
     // Proxy mode selection
     proxyTitle: 'Choose Connection Mode',
-    proxySubtitle: 'Select how to connect. Only Claude traffic will be routed through the optimization tunnel.',
+    proxySubtitle: 'Select how to connect. Only selected service traffic will be routed through the optimization tunnel.',
     proxyAuto: 'Auto Detect',
     proxyAutoDesc: 'For users with Clash or other proxy clients',
     proxyManual: 'Manual Proxy',
@@ -208,7 +213,7 @@ export const en = {
   networkStatus: {
     title: 'Network Optimized',
     titleError: 'Network Error',
-    desc: 'Proxy service is running. Claude traffic is routed through the optimization tunnel.',
+    desc: 'Proxy service is running. Selected service traffic is routed through the optimization tunnel.',
     descError: 'Proxy connection lost. Please reconfigure.',
     proxyStatus: 'Proxy Status',
     upstreamProxy: 'Upstream Proxy',

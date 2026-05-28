@@ -104,9 +104,14 @@ export const zh = {
     purityProxy: 'VPN / 代理',
     purityDC: '数据中心',
     startOptimize: '开始网络优化',
+    // Service selection
+    serviceLabel: '优化服务',
+    serviceClaude: 'Claude',
+    serviceChatgpt: 'ChatGPT (Codex)',
+    serviceBoth: 'ChatGPT + Claude',
     // Proxy mode selection
     proxyTitle: '选择连接方式',
-    proxySubtitle: '选择你的网络接入方式，仅 Claude 相关流量会经过优化通道',
+    proxySubtitle: '选择你的网络接入方式，仅所选服务的流量会经过优化通道',
     proxyAuto: '自动检测',
     proxyAutoDesc: '适用于您有 Clash 及其他代理客户端的情况',
     proxyManual: '手动设置代理',
@@ -208,7 +213,7 @@ export const zh = {
   networkStatus: {
     title: '网络优化正常',
     titleError: '网络连接异常',
-    desc: '代理服务运行中，Claude 流量已通过优化通道',
+    desc: '代理服务运行中，所选服务流量已通过优化通道',
     descError: '代理连接已断开，请重新配置',
     proxyStatus: '代理状态',
     upstreamProxy: '前置代理',

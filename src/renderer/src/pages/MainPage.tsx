@@ -219,6 +219,13 @@ function PhoneGatewayInline() {
 export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPageProps) {
   const { t } = useLocale()
   const [activeTab, setActiveTab] = useState<'web' | 'code'>('web')
+  const [proxyServices, setProxyServices] = useState<'claude' | 'chatgpt' | 'both'>('both')
+
+  useEffect(() => {
+    window.electronAPI.settings.get().then((s) => {
+      if (s.proxyServices) setProxyServices(s.proxyServices)
+    })
+  }, [])
 
   const webSteps = [
     <>{t.main.claudeWeb.step1}</>,
@@ -266,11 +273,22 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
         </div>
 
         <div className="flex items-center gap-2">
-          <SmsActivationCard
-            claudeAccountId={claudeAccountId}
-            hasPaidPlan={hasPaidPlan}
-            networkOk={networkOk}
-          />
+          {(proxyServices === 'claude' || proxyServices === 'both') && (
+            <SmsActivationCard
+              claudeAccountId={claudeAccountId}
+              hasPaidPlan={hasPaidPlan}
+              networkOk={networkOk}
+              target="claude"
+            />
+          )}
+          {(proxyServices === 'chatgpt' || proxyServices === 'both') && (
+            <SmsActivationCard
+              claudeAccountId={claudeAccountId}
+              hasPaidPlan={hasPaidPlan}
+              networkOk={networkOk}
+              target="openai"
+            />
+          )}
         </div>
       </div>
 

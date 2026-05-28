@@ -28,6 +28,7 @@ interface SystemProxyInfo {
   port?: string
 }
 
+type ProxyServices = 'claude' | 'chatgpt' | 'both'
 type View = 'detecting' | 'result' | 'optimizing'
 
 function getPurity(info: IpInfo): 'clean' | 'proxy' | 'datacenter' {
@@ -65,6 +66,13 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   const [progress, setProgress] = useState(0)
   const [step, setStep] = useState(0)
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
+  const [proxyServices, setProxyServices] = useState<ProxyServices>('both')
+
+  useEffect(() => {
+    window.electronAPI.settings.get().then((s) => {
+      if (s.proxyServices) setProxyServices(s.proxyServices)
+    })
+  }, [])
 
   const detectEnvironment = useCallback(async () => {
     setView('detecting')
@@ -98,6 +106,9 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   const startOptimize = useCallback(async () => {
     if (!ipInfo || systemProxy.found || ipInfo.isChina) return
 
+    const currentSettings = await window.electronAPI.settings.get()
+    await window.electronAPI.settings.set({ ...currentSettings, proxyServices })
+
     setView('optimizing')
     setProgress(0)
     setStep(0)
@@ -125,7 +136,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
 
     setStep(3)
     setProgress(100)
-  }, [ipInfo, systemProxy.found])
+  }, [ipInfo, systemProxy.found, proxyServices])
 
   const steps = [
     t.network.stepDetect,
@@ -272,6 +283,23 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
             {hasSystemProxy ? t.network.systemProxyHint : t.network.tunRequiredHint}
           </p>
         )}
+
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-[11px] text-text-faint font-mono mr-1">{t.network.serviceLabel}</span>
+          {(['claude', 'chatgpt', 'both'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setProxyServices(v)}
+              className={`px-3 py-1 rounded-md text-[12px] font-mono transition-colors cursor-pointer ${
+                proxyServices === v
+                  ? 'bg-brand text-white'
+                  : 'bg-bg-card border border-border text-text-secondary hover:border-brand/40'
+              }`}
+            >
+              {v === 'claude' ? t.network.serviceClaude : v === 'chatgpt' ? t.network.serviceChatgpt : t.network.serviceBoth}
+            </button>
+          ))}
+        </div>
 
         <div className="flex items-center gap-3">
           <button

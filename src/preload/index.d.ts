@@ -57,6 +57,7 @@ declare global {
           autoLaunch: boolean
           savedEmail: string
           savedPassword: string
+          proxyServices: 'claude' | 'chatgpt' | 'both'
         }>
         set: (settings: {
           rememberPassword: boolean
@@ -64,17 +65,18 @@ declare global {
           autoLaunch: boolean
           savedEmail: string
           savedPassword: string
+          proxyServices: 'claude' | 'chatgpt' | 'both'
         }) => Promise<{ ok: boolean }>
       }
       proxyAuth: {
         login: () => Promise<AuthResponse>
       }
       sms: {
-        requestNumber: () => Promise<AuthResponse>
-        phoneNumber: () => Promise<AuthResponse>
-        status: () => Promise<AuthResponse>
-        refreshNumber: () => Promise<AuthResponse>
-        refund: () => Promise<AuthResponse>
+        requestNumber: (target?: string) => Promise<AuthResponse>
+        phoneNumber: (target?: string) => Promise<AuthResponse>
+        status: (target?: string) => Promise<AuthResponse>
+        refreshNumber: (target?: string) => Promise<AuthResponse>
+        refund: (target?: string) => Promise<AuthResponse>
       }
       payment: {
         checkout: (productType: string, provider?: string, claudeAccountId?: string) => Promise<AuthResponse>

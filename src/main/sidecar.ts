@@ -10,6 +10,68 @@ const LOCAL_PORT = LOCAL_HTTP_PORT
 export const PHONE_GATEWAY_PORT = 21912
 const DEFAULT_PRE_PROXY = '127.0.0.1:7890'
 
+export type ProxyServices = 'claude' | 'chatgpt' | 'both'
+
+const CLAUDE_DOMAINS: string[] = [
+  'domain:anthropic.com',
+  'domain:anthropic.co',
+  'domain:claude.ai',
+  'domain:claude.com',
+  'domain:clau.de',
+  'domain:claudemcpclient.com',
+  'domain:claudeusercontent.com',
+  'domain:cdn.anthropic.com',
+  'domain:anthropic.com.cdn.cloudflare.net',
+  'domain:servd-anthropic-website.b-cdn.net',
+  'domain:anthropic.auth0.com',
+  'domain:storage.googleapis.com',
+  'regexp:.*anthropic.*',
+  'regexp:.*claude.*',
+]
+
+const CHATGPT_DOMAINS: string[] = [
+  'domain:openai.com',
+  'domain:chatgpt.com',
+  'regexp:.*openai.*',
+  'regexp:.*chatgpt.*',
+]
+
+const SHARED_DOMAINS: string[] = [
+  // Datadog
+  'domain:datadoghq.com',
+  'domain:datadog.com',
+  'domain:ddog-gov.com',
+  'domain:datadoghq.eu',
+  'domain:browser-intake-us5-datadoghq.com',
+  'domain:browser-intake-datadoghq.com',
+  'domain:browser-intake-us3-datadoghq.com',
+  'domain:browser-intake-us1-datadoghq.com',
+  // Sentry
+  'domain:sentry.io',
+  // Statsig
+  'domain:statsigapi.net',
+  'domain:statsig.com',
+  'domain:segment.io',
+  'domain:growthbook.io',
+  'domain:split.io',
+  'domain:intellimize.co',
+  'domain:cdn.usefathom.com',
+  // Intercom
+  'domain:intercom.io',
+  'domain:intercomcdn.com',
+  // Misc
+  'domain:facebook.net',
+  'domain:ipify.org',
+  // Regex
+  'regexp:.*datadog.*',
+  'regexp:.*ddog.*',
+  'regexp:.*sentry.*',
+  'regexp:.*statsig.*',
+  'regexp:.*intercom.*',
+]
+
+const CLAUDE_IPS: string[] = ['160.79.104.0/21']
+
 export interface PhoneGatewayConfig {
   host: string
   port: number
@@ -63,7 +125,8 @@ function generateConfig(
   preProxyHost?: string,
   preProxyPort?: number,
   preProxyProtocol: UpstreamProtocol = 'http',
-  phoneGateway?: PhoneGatewayConfig | null
+  phoneGateway?: PhoneGatewayConfig | null,
+  proxyServices: ProxyServices = 'both'
 ): object {
   const usePreProxy = preProxyHost && preProxyPort
   const preProxySettings = usePreProxy
@@ -128,77 +191,22 @@ function generateConfig(
     )
   }
 
+  const domains: string[] = [...SHARED_DOMAINS]
+  const ips: string[] = []
+  if (proxyServices === 'claude' || proxyServices === 'both') {
+    domains.push(...CLAUDE_DOMAINS)
+    ips.push(...CLAUDE_IPS)
+  }
+  if (proxyServices === 'chatgpt' || proxyServices === 'both') {
+    domains.push(...CHATGPT_DOMAINS)
+  }
+
   const routingRules: Record<string, unknown>[] = [
-    // Claude / Anthropic domains → proxy
-    {
-      type: 'field',
-      outboundTag: 'proxy',
-      domain: [
-        // --- Core Anthropic & Claude ---
-        'domain:anthropic.com',
-        'domain:anthropic.co',
-        'domain:claude.ai',
-        'domain:claude.com',
-        'domain:clau.de',
-        'domain:claudemcpclient.com',
-        'domain:claudeusercontent.com',
-        // --- CDN & Infrastructure ---
-        'domain:cdn.anthropic.com',
-        'domain:anthropic.com.cdn.cloudflare.net',
-        'domain:servd-anthropic-website.b-cdn.net',
-        // --- Authentication ---
-        'domain:anthropic.auth0.com',
-        // --- Google Storage (model assets) ---
-        'domain:storage.googleapis.com',
-        // --- Monitoring: Datadog ---
-        'domain:datadoghq.com',
-        'domain:datadog.com',
-        'domain:ddog-gov.com',
-        'domain:datadoghq.eu',
-        'domain:browser-intake-us5-datadoghq.com',
-        'domain:browser-intake-datadoghq.com',
-        'domain:browser-intake-us3-datadoghq.com',
-        'domain:browser-intake-us1-datadoghq.com',
-        // --- Monitoring: Sentry ---
-        'domain:sentry.io',
-        // --- Analytics & Feature Flags ---
-        'domain:statsigapi.net',
-        'domain:statsig.com',
-        'domain:segment.io',
-        'domain:growthbook.io',
-        'domain:split.io',
-        'domain:intellimize.co',
-        'domain:cdn.usefathom.com',
-        // --- Customer Support ---
-        'domain:intercom.io',
-        'domain:intercomcdn.com',
-        // --- Misc ---
-        'domain:facebook.net',
-        'domain:ipify.org',
-        // --- Regex fallback ---
-        'regexp:.*anthropic.*',
-        'regexp:.*claude.*',
-        'regexp:.*datadog.*',
-        'regexp:.*ddog.*',
-        'regexp:.*sentry.*',
-        'regexp:.*statsig.*',
-        'regexp:.*intercom.*',
-      ],
-    },
-    // Anthropic IP range fallback (when domain doesn't match, resolved IP may hit this)
-    {
-      type: 'field',
-      outboundTag: 'proxy',
-      ip: ['160.79.104.0/21'],
-    },
-    // Block QUIC (UDP 443) to force browsers to fall back to TCP (HTTP/2),
-    // ensuring proxy sniffing can read SNI for proper domain matching
-    {
-      type: 'field',
-      outboundTag: 'block',
-      port: '443',
-      network: 'udp',
-    },
+    { type: 'field', outboundTag: 'proxy', domain: domains },
+    ...(ips.length > 0
+      ? [{ type: 'field', outboundTag: 'proxy', ip: ips }]
+      : []),
+    { type: 'field', outboundTag: 'block', port: '443', network: 'udp' },
   ]
 
   const inbounds: Record<string, unknown>[] = [
@@ -273,12 +281,13 @@ function probePort(port: number): Promise<boolean> {
 export async function startSidecar(
   proxyPassword: string,
   _preProxy?: string,
-  phoneGateway?: PhoneGatewayConfig | null
+  phoneGateway?: PhoneGatewayConfig | null,
+  proxyServices: ProxyServices = 'both'
 ): Promise<{ ok: boolean; error?: string }> {
   await stopSidecar()
   sidecarStopping = false
 
-  const config = generateConfig(proxyPassword, undefined, undefined, 'http', phoneGateway)
+  const config = generateConfig(proxyPassword, undefined, undefined, 'http', phoneGateway, proxyServices)
   const configDir = getConfigDir()
   const configPath = join(configDir, 'config.json')
   writeFileSync(configPath, JSON.stringify(config, null, 2))
