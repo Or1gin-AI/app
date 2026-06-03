@@ -1211,17 +1211,39 @@ function schedulePhoneGatewayExpiry(): void {
 
 // --- System proxy monitor (only when optimization active) ---
 let proxyMonitorInterval: ReturnType<typeof setInterval> | null = null
+// How many consecutive 3s ticks we must keep re-asserting the system proxy
+// before treating it as a genuine conflict (another app actively overwriting it).
+const PROXY_CONFLICT_TICKS = 4
+let proxyReassertStreak = 0
 
 function startProxyMonitor(): void {
   if (proxyMonitorInterval) return
+  proxyReassertStreak = 0
   proxyMonitorInterval = setInterval(async () => {
     if (!isSidecarRunning()) return
-    const ours = await checkSystemProxy()
-    broadcast('proxy:conflict', { hijacked: !ours })
+    if (await checkSystemProxy()) {
+      // System proxy is still ours — healthy.
+      proxyReassertStreak = 0
+      broadcast('proxy:conflict', { hijacked: false })
+      return
+    }
+    // Not ours. Most common cause: macOS drops the per-service proxy enable
+    // flag across sleep/wake (server still points at us, just disabled) — this
+    // silently breaks browser/GUI traffic. Re-assert instead of alarming.
+    if (proxyReassertStreak < PROXY_CONFLICT_TICKS) {
+      await setSystemProxy().catch(() => {})
+      proxyReassertStreak++
+      broadcast('proxy:conflict', { hijacked: false })
+    } else {
+      // We've re-asserted repeatedly and it still isn't ours — another app is
+      // actively overwriting the system proxy. Surface a real conflict.
+      broadcast('proxy:conflict', { hijacked: true })
+    }
   }, 3000)
 }
 
 function stopProxyMonitor(): void {
+  proxyReassertStreak = 0
   if (proxyMonitorInterval) {
     clearInterval(proxyMonitorInterval)
     proxyMonitorInterval = null
