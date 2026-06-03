@@ -152,6 +152,15 @@ function OtpInput({
 
 /* ── Main component ── */
 
+// Auto-login from saved credentials fires at most once per app launch. This
+// guard lives at module scope so it survives LoginPage unmount/remount — e.g.
+// after the session is kicked/expired and the app bounces back to the login
+// page. Without it, every involuntary logout would immediately auto-login
+// again, trapping the user in a re-login loop with no way to stay logged out
+// (to reset their password) or log out at all. It only resets on a full app
+// restart, so the "auto-login on launch" preference still works as intended.
+let autoLoginAttempted = false
+
 export function LoginPage({ onLogin }: LoginPageProps) {
   const { t } = useLocale()
   const [view, setView] = useState<AuthView>('login')
@@ -191,7 +200,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       if (s.rememberPassword && s.savedEmail) {
         setEmail(s.savedEmail)
         setPassword(s.savedPassword)
-        if (s.autoLogin) pendingAutoLogin.current = true
+        if (s.autoLogin && !autoLoginAttempted) pendingAutoLogin.current = true
       }
     })
   }, [])
@@ -258,14 +267,23 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   /* ── Handlers ── */
 
   const persistSettings = useCallback(
-    (rp: boolean, al: boolean, launch: boolean, em: string, pw: string) => {
-      window.electronAPI.settings.set({
-        rememberPassword: rp,
-        autoLogin: al,
-        autoLaunch: launch,
-        savedEmail: rp ? em : '',
-        savedPassword: rp ? pw : '',
-      })
+    async (rp: boolean, al: boolean, launch: boolean, em: string, pw: string) => {
+      // Best-effort: a failed settings write must never block/fail a successful
+      // sign-in, so we swallow errors here rather than let them reach doSignIn.
+      try {
+        // settings:set overwrites the whole file, so we must carry over fields
+        // this form doesn't own (e.g. proxyServices) — otherwise signing in
+        // would silently reset the user's proxy-scope choice to the default.
+        const current = await window.electronAPI.settings.get().catch(() => null)
+        await window.electronAPI.settings.set({
+          rememberPassword: rp,
+          autoLogin: al,
+          autoLaunch: launch,
+          savedEmail: rp ? em : '',
+          savedPassword: rp ? pw : '',
+          proxyServices: current?.proxyServices ?? 'both',
+        })
+      } catch { /* persistence is best-effort */ }
     },
     [],
   )
@@ -279,7 +297,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       const res = await window.electronAPI.auth.signIn(email, password)
       if (res.status === 200) {
-        persistSettings(rememberPassword, autoLogin, autoLaunch, email, password)
+        await persistSettings(rememberPassword, autoLogin, autoLaunch, email, password)
         const data = res.data as { user?: { email: string; name: string } }
         onLogin({ email: data.user?.email ?? email, name: data.user?.name ?? '' })
       } else if (res.status === 403) {
@@ -364,6 +382,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       return
     }
     pendingAutoLogin.current = false
+    autoLoginAttempted = true
     void doSignIn()
   }, [autoLogin, email, password, view, loading])
 
