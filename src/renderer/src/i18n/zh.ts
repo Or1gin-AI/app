@@ -109,6 +109,12 @@ export const zh = {
     serviceClaude: 'Claude',
     serviceChatgpt: 'ChatGPT (Codex)',
     serviceBoth: 'ChatGPT + Claude',
+    gatewayLabel: '日本专线',
+    gatewayReady: '就绪',
+    layer2Label: '第二层（美国住宅）',
+    layer2Hint: '选中的服务走美国住宅出口，其余非大陆流量走日本专线出口。',
+    serviceOff: '关闭',
+    frontProxyUnavailable: '日本专线不可用，请稍后重试。',
     // Proxy mode selection
     proxyTitle: '选择连接方式',
     proxySubtitle: '选择你的网络接入方式，仅所选服务的流量会经过优化通道',
@@ -149,6 +155,7 @@ export const zh = {
     autoRedirect: '配置完成后将自动进入主页面',
   },
   main: {
+    pureGatewayLabel: '纯专线模式',
     claudeWeb: {
       label: 'CLAUDE WEB / DESKTOP',
       title: '网页版 / 桌面版',
