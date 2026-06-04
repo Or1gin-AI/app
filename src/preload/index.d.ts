@@ -57,7 +57,7 @@ declare global {
           autoLaunch: boolean
           savedEmail: string
           savedPassword: string
-          proxyServices: 'claude' | 'chatgpt' | 'both'
+          proxyServices: 'off' | 'claude' | 'chatgpt' | 'both'
         }>
         set: (settings: {
           rememberPassword: boolean
@@ -65,7 +65,7 @@ declare global {
           autoLaunch: boolean
           savedEmail: string
           savedPassword: string
-          proxyServices: 'claude' | 'chatgpt' | 'both'
+          proxyServices: 'off' | 'claude' | 'chatgpt' | 'both'
         }) => Promise<{ ok: boolean }>
       }
       proxyAuth: {
@@ -105,6 +105,9 @@ declare global {
         status: () => Promise<{ running: boolean }>
         verify: () => Promise<{ ok: boolean; ip?: string; error?: string }>
         proxyStatus: () => Promise<{ running: boolean; port: number; preProxy: string | null }>
+      }
+      frontProxy: {
+        status: () => Promise<{ enabled: boolean }>
       }
       phoneGateway: {
         enable: () => Promise<{ ok: boolean; error?: string; gateway?: PhoneGatewayInfo; payload?: string | null; clashPayload?: string | null }>

@@ -81,6 +81,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verify: () => ipcRenderer.invoke('sidecar:verify'),
     proxyStatus: () => ipcRenderer.invoke('sidecar:proxy-status')
   },
+  frontProxy: {
+    status: () => ipcRenderer.invoke('front-proxy:status'),
+  },
   phoneGateway: {
     enable: () => ipcRenderer.invoke('phone-gateway:enable'),
     disable: () => ipcRenderer.invoke('phone-gateway:disable'),
@@ -100,7 +103,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       autoLaunch: boolean
       savedEmail: string
       savedPassword: string
-      proxyServices: 'claude' | 'chatgpt' | 'both'
+      proxyServices: 'off' | 'claude' | 'chatgpt' | 'both'
     }) => ipcRenderer.invoke('settings:set', settings),
   },
   session: {
