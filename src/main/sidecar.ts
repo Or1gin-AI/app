@@ -3,14 +3,14 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { spawn, ChildProcess, execFile } from 'child_process'
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
+import { buildXrayConfig, type FrontProxyConfig as FPConfig } from './xray-config'
+export type FrontProxyConfig = FPConfig
 
 const LOCAL_HTTP_PORT = 21911
 const LOCAL_SOCKS_PORT = 21910
 const LOCAL_PORT = LOCAL_HTTP_PORT
 export const PHONE_GATEWAY_PORT = 21912
-const DEFAULT_PRE_PROXY = '127.0.0.1:7890'
-
-export type ProxyServices = 'claude' | 'chatgpt' | 'both'
+export type ProxyServices = 'off' | 'claude' | 'chatgpt' | 'both'
 
 const CLAUDE_DOMAINS: string[] = [
   'domain:anthropic.com',
@@ -122,147 +122,24 @@ function getConfigDir(): string {
 
 function generateConfig(
   proxyPassword: string,
-  preProxyHost?: string,
-  preProxyPort?: number,
-  preProxyProtocol: UpstreamProtocol = 'http',
-  phoneGateway?: PhoneGatewayConfig | null,
-  proxyServices: ProxyServices = 'both'
+  frontProxy: FrontProxyConfig | null,
+  phoneGateway: PhoneGatewayConfig | null,
+  proxyServices: ProxyServices,
 ): object {
-  const usePreProxy = preProxyHost && preProxyPort
-  const preProxySettings = usePreProxy
-    ? {
-        servers: [
-          {
-            address: preProxyHost,
-            port: preProxyPort,
-          },
-        ],
-      }
-    : undefined
-
-  const proxyOutbound: Record<string, unknown> = {
-    tag: 'proxy',
-    protocol: 'shadowsocks',
-    settings: {
-      servers: [
-        {
-          address: REMOTE.address,
-          port: REMOTE.port,
-          method: REMOTE.method,
-          password: proxyPassword,
-        },
-      ],
-    },
-    streamSettings: {
-      network: 'ws',
-      security: 'tls',
-      tlsSettings: {
-        serverName: REMOTE.serverName,
-        fingerprint: 'chrome',
-      },
-      wsSettings: {
-        path: REMOTE.wsPath,
-      },
-    },
-  }
-
-  if (usePreProxy) {
-    proxyOutbound.proxySettings = { tag: 'pre-proxy' }
-  }
-
-  const outbounds: Record<string, unknown>[] = []
-
-  if (usePreProxy) {
-    outbounds.push(
-      { tag: 'direct', protocol: 'freedom' },
-      proxyOutbound,
-      {
-        tag: 'pre-proxy',
-        protocol: preProxyProtocol,
-        settings: preProxySettings,
-      },
-      { tag: 'block', protocol: 'blackhole' },
-    )
-  } else {
-    outbounds.push(
-      { tag: 'direct', protocol: 'freedom' },
-      proxyOutbound,
-      { tag: 'block', protocol: 'blackhole' },
-    )
-  }
-
-  const domains: string[] = [...SHARED_DOMAINS]
-  const ips: string[] = []
-  if (proxyServices === 'claude' || proxyServices === 'both') {
-    domains.push(...CLAUDE_DOMAINS)
-    ips.push(...CLAUDE_IPS)
-  }
-  if (proxyServices === 'chatgpt' || proxyServices === 'both') {
-    domains.push(...CHATGPT_DOMAINS)
-  }
-
-  const routingRules: Record<string, unknown>[] = [
-    { type: 'field', outboundTag: 'proxy', domain: domains },
-    ...(ips.length > 0
-      ? [{ type: 'field', outboundTag: 'proxy', ip: ips }]
-      : []),
-    { type: 'field', outboundTag: 'block', port: '443', network: 'udp' },
-  ]
-
-  const inbounds: Record<string, unknown>[] = [
-    {
-      tag: 'socks-in',
-      port: LOCAL_SOCKS_PORT,
-      listen: '127.0.0.1',
-      protocol: 'socks',
-      settings: { udp: true },
-    },
-    {
-      tag: 'http-in',
-      port: LOCAL_HTTP_PORT,
-      listen: '127.0.0.1',
-      protocol: 'http',
-    },
-  ]
-
-  if (phoneGateway) {
-    inbounds.push({
-      tag: 'phone-gateway-in',
-      port: phoneGateway.port,
-      listen: phoneGateway.host,
-      protocol: 'socks',
-      settings: {
-        auth: 'password',
-        udp: true,
-        accounts: [
-          {
-            user: phoneGateway.user,
-            pass: phoneGateway.pass,
-          },
-        ],
-      },
-    })
-  }
-
-  return {
-    log: { loglevel: 'info' },
-    dns: {
-      queryStrategy: 'UseIPv4',
-      servers: [
-        {
-          address: 'https://1.1.1.1/dns-query',
-          skipFallback: true,
-        },
-        'localhost',
-      ],
-    },
-    inbounds,
-    outbounds,
-    routing: {
-      domainStrategy: 'IPIfNonMatch',
-      rules: routingRules,
-    },
-  }
+  return buildXrayConfig({
+    proxyPassword,
+    frontProxy,
+    phoneGateway: phoneGateway
+      ? { host: phoneGateway.host, port: phoneGateway.port, user: phoneGateway.user, pass: phoneGateway.pass }
+      : null,
+    proxyServices,
+    remote: { address: REMOTE.address, port: REMOTE.port, serverName: REMOTE.serverName, wsPath: REMOTE.wsPath, method: REMOTE.method },
+    ports: { socks: LOCAL_SOCKS_PORT, http: LOCAL_HTTP_PORT },
+    sharedDomains: SHARED_DOMAINS,
+    claudeDomains: CLAUDE_DOMAINS,
+    claudeIps: CLAUDE_IPS,
+    chatgptDomains: CHATGPT_DOMAINS,
+  })
 }
 
 /** Try connecting to a port to check if it's listening */
@@ -280,14 +157,14 @@ function probePort(port: number): Promise<boolean> {
 
 export async function startSidecar(
   proxyPassword: string,
-  _preProxy?: string,
+  frontProxy?: FrontProxyConfig | null,
   phoneGateway?: PhoneGatewayConfig | null,
   proxyServices: ProxyServices = 'both'
 ): Promise<{ ok: boolean; error?: string }> {
   await stopSidecar()
   sidecarStopping = false
 
-  const config = generateConfig(proxyPassword, undefined, undefined, 'http', phoneGateway, proxyServices)
+  const config = generateConfig(proxyPassword, frontProxy ?? null, phoneGateway ?? null, proxyServices)
   const configDir = getConfigDir()
   const configPath = join(configDir, 'config.json')
   writeFileSync(configPath, JSON.stringify(config, null, 2))
@@ -305,6 +182,7 @@ export async function startSidecar(
       console.log('[xray] config:', configPath)
       sidecarProcess = spawn(binary, ['run', '-c', configPath], {
         cwd: binaryDir,
+        env: { ...process.env, XRAY_LOCATION_ASSET: binaryDir },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true
       })
@@ -681,7 +559,7 @@ interface PreProxyProbeResult {
   error?: string
 }
 
-function probeTcpEndpoint(host: string, port: number): Promise<{ ok: boolean; latency?: number; error?: string }> {
+export function probeTcpEndpoint(host: string, port: number): Promise<{ ok: boolean; latency?: number; error?: string }> {
   const net = require('node:net') as typeof import('node:net')
   return new Promise((resolve) => {
     const start = Date.now()
