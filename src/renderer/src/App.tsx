@@ -168,6 +168,8 @@ function App(): React.JSX.Element {
   const [accountStatus, setAccountStatus] = useState('OK')
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [networkOk, setNetworkOk] = useState(true)
+  const [isWhitelist, setIsWhitelist] = useState(false)
+  const isWhitelistRef = useRef(false)
   const [exitIp, setExitIp] = useState<string | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
   const userPlanRef = useRef<PlanId>('free')
@@ -227,6 +229,19 @@ function App(): React.JSX.Element {
       nuRes.status === 200 &&
       (nuRes.data as { isNewuser?: number })?.isNewuser === 1
     )
+  }, [])
+
+  // Whitelist users get free full access (no subscription); fetched from the backend.
+  const fetchWhitelist = useCallback(async (): Promise<boolean> => {
+    try {
+      const r = await window.electronAPI.frontProxy.status()
+      const wl = !!r?.enabled
+      setIsWhitelist(wl)
+      isWhitelistRef.current = wl
+      return wl
+    } catch {
+      return isWhitelistRef.current
+    }
   }, [])
 
   const routeSubscribedUser = useCallback(async () => {
@@ -322,7 +337,8 @@ function App(): React.JSX.Element {
         identify(res.user.email, { name: res.user.name ?? '' })
         window.electronAPI.session.startCheck()
         const plan = await fetchSubscription()
-        if (plan === 'free') {
+        const wl = await fetchWhitelist()
+        if (plan === 'free' && !wl) {
           setPage('plan')
         } else {
           prevPlanRef.current = plan
@@ -346,8 +362,8 @@ function App(): React.JSX.Element {
   // Page access guards
   useEffect(() => {
     if (page === 'loading' || page === 'login' || page === 'plan') return
-    // Priority 1: Free plan — can only access plan page
-    if (userPlan === 'free') {
+    // Priority 1: Free plan — can only access plan page (whitelist = free full access, skip gate)
+    if (userPlan === 'free' && !isWhitelist) {
       setPage('plan')
       return
     }
@@ -355,7 +371,7 @@ function App(): React.JSX.Element {
     if (!networkOk && page === 'main') {
       setPage('network-status')
     }
-  }, [page, userPlan, networkOk])
+  }, [page, userPlan, networkOk, isWhitelist])
 
   // Detect plan transition from free → paid while on plan page → navigate to onboarding/network
   useEffect(() => {
@@ -373,7 +389,7 @@ function App(): React.JSX.Element {
 
     // Do not probe while the user is configuring networking. Those requests add
     // noise exactly when Xray is warming up and can interfere with final verify.
-    if (!shouldRunHealth || userPlan === 'free') {
+    if (!shouldRunHealth || (userPlan === 'free' && !isWhitelist)) {
       if (healthStarted.current) {
         window.electronAPI.health.stop()
         if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }
@@ -398,7 +414,7 @@ function App(): React.JSX.Element {
       setExitIp(data.ip)
       // Only redirect from main page — don't interrupt network setup or other pages
     })
-  }, [page, userPlan])
+  }, [page, userPlan, isWhitelist])
 
   const handleLogin = useCallback(async (user: { email: string; name: string }) => {
     setUserEmail(user.email)
@@ -407,13 +423,14 @@ function App(): React.JSX.Element {
     track(EVENTS.USER_LOGGED_IN)
     window.electronAPI.session.startCheck()
     const plan = await fetchSubscription()
-    if (plan === 'free') {
+    const wl = await fetchWhitelist()
+    if (plan === 'free' && !wl) {
       setPage('plan')
     } else {
       prevPlanRef.current = plan
       await routeSubscribedUser()
     }
-  }, [fetchSubscription, posthog, routeSubscribedUser])
+  }, [fetchSubscription, posthog, routeSubscribedUser, fetchWhitelist])
 
   const handleNetworkComplete = useCallback(async () => {
     setNetworkOk(true)
@@ -447,6 +464,8 @@ function App(): React.JSX.Element {
     setUserEmail('')
     setUserName('')
     setUserPlan('free')
+    setIsWhitelist(false)
+    isWhitelistRef.current = false
     setPlanExpires('')
     setClaudeAccountId('')
     setClaudeAccountRegistered(false)
@@ -467,9 +486,9 @@ function App(): React.JSX.Element {
   }, [fetchSubscription])
 
   const handlePlanBack = useCallback(() => {
-    if (userPlan === 'free') return
+    if (userPlan === 'free' && !isWhitelist) return
     setPage('main')
-  }, [userPlan])
+  }, [userPlan, isWhitelist])
 
   const handleNetworkClick = useCallback(async () => {
     const status = await window.electronAPI.sidecar.status()
@@ -477,12 +496,12 @@ function App(): React.JSX.Element {
   }, [])
 
   const handleNetworkStatusBack = useCallback(() => {
-    if (userPlan === 'free') {
+    if (userPlan === 'free' && !isWhitelist) {
       setPage('plan')
     } else {
       setPage('main')
     }
-  }, [userPlan])
+  }, [userPlan, isWhitelist])
 
   // Overlay is only shown while actively installing (user clicked restart)
   // or when an error needs user attention. Downloaded/downloading use the
