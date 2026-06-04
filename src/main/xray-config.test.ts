@@ -25,6 +25,7 @@ describe('buildXrayConfig', () => {
     expect(hasCnDirect).toBe(false)
     const proxy = cfg.outbounds.find((o: any) => o.tag === 'proxy')
     expect(proxy.proxySettings).toBeUndefined()
+    expect(proxy.streamSettings.sockopt?.dialerProxy).toBeUndefined()
   })
 
   it('whitelist global tunnel (both): CN direct, AI→proxy via gateway, default MATCH→gateway', () => {
@@ -35,7 +36,7 @@ describe('buildXrayConfig', () => {
     expect(gw.settings.vnext[0]).toMatchObject({ address: '64.83.46.210', port: 12690 })
     expect(gw.settings.vnext[0].users[0]).toMatchObject({ id: 'uuid-1', encryption: 'none' })
     const proxy = cfg.outbounds.find((o: any) => o.tag === 'proxy')
-    expect(proxy.proxySettings).toEqual({ tag: 'gateway' })
+    expect(proxy.streamSettings.sockopt).toEqual({ dialerProxy: 'gateway' })
     expect(rules(cfg).some(r => (r.domain || []).includes('geosite:cn'))).toBe(true)
     expect(rules(cfg).some(r => (r.ip || []).includes('geoip:cn'))).toBe(true)
     expect(rules(cfg).some(r => r.outboundTag === 'proxy' && (r.domain || []).includes('regexp:.*claude.*'))).toBe(true)

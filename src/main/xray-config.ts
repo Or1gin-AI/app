@@ -45,7 +45,10 @@ export function buildXrayConfig(opts: BuildOpts): object {
       settings: { vnext: [{ address: frontProxy!.server, port: frontProxy!.port, users: [{ id: frontProxy!.uuid, encryption: 'none' }] }] },
       streamSettings: { network: 'tcp', security: 'none' },
     })
-    proxyOutbound.proxySettings = { tag: 'gateway' }
+    // Chain the shadowsocks proxy through the Japan gateway at the dialer (TCP) layer.
+    // NOTE: outbound-level `proxySettings: { tag }` does NOT compose with this ws/tls
+    // shadowsocks outbound (connection fails); `sockopt.dialerProxy` is the working form.
+    ;(proxyOutbound.streamSettings as Record<string, unknown>).sockopt = { dialerProxy: 'gateway' }
   }
   outbounds.push(proxyOutbound, { tag: 'block', protocol: 'blackhole' })
 
