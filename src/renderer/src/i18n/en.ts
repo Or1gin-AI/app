@@ -109,6 +109,12 @@ export const en = {
     serviceClaude: 'Claude',
     serviceChatgpt: 'ChatGPT (Codex)',
     serviceBoth: 'ChatGPT + Claude',
+    gatewayLabel: 'Dedicated Line',
+    gatewayReady: 'Ready',
+    layer2Label: 'US Residential',
+    layer2Hint: 'Selected services exit via US residential; all other non-China traffic exits via the dedicated line.',
+    serviceOff: 'Off',
+    frontProxyUnavailable: 'Dedicated line is unavailable. Please try again later.',
     // Proxy mode selection
     proxyTitle: 'Choose Connection Mode',
     proxySubtitle: 'Select how to connect. Only selected service traffic will be routed through the optimization tunnel.',
@@ -149,6 +155,7 @@ export const en = {
     autoRedirect: 'Will automatically proceed when complete',
   },
   main: {
+    pureGatewayLabel: 'Dedicated line only',
     claudeWeb: {
       label: 'CLAUDE WEB / DESKTOP',
       title: 'Web / Desktop',
