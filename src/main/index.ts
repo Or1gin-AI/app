@@ -9,7 +9,7 @@ import { net } from 'electron'
 import http from 'node:http'
 import { execFile as cpExecFile } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs'
-import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, PHONE_GATEWAY_PORT, type PhoneGatewayConfig, type ProxyServices } from './sidecar'
+import { startSidecar, stopSidecar, isSidecarRunning, verifySidecar, onSidecarCrash, setSystemProxy, clearSystemProxy, clearShellProxy, setShellProxy, killOrphanedSidecar, checkSystemProxy, getLocalPort, startHelper, stopHelper, killOrphanedHelper, PHONE_GATEWAY_PORT, probeTcpEndpoint, type PhoneGatewayConfig, type ProxyServices, type FrontProxyConfig } from './sidecar'
 
 const API_BASE = process.env.ORIGINAI_API_BASE || process.env.API_BASE || 'https://dev.originai.cc'
 const PROXY_HEALTH_CHECK_MS = 10 * 60 * 1000
@@ -522,7 +522,7 @@ async function fetchProxyIpWithRetry(): Promise<string | null> {
 
   // Restart Xray with same key and retry
   console.log('[proxy] IP check failed, restarting with same key')
-  const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
   if (!result.ok) {
     console.warn('[proxy] restart failed:', result.error)
     return null
@@ -1056,6 +1056,7 @@ ipcMain.handle('ticket:comment', async (_e, ticketId: string, content: string) =
 type ProxyCredentials = { username: string; password: string }
 let proxyCredentials: ProxyCredentials | null = null
 let currentPreProxy: string | null = null // e.g. '127.0.0.1:7890' or null if direct
+let currentFrontProxy: FrontProxyConfig | null = null
 let proxyHealthCheckInterval: ReturnType<typeof setInterval> | null = null
 let proxyHealthCheckInFlight = false
 let proxyLifecycleVersion = 0
@@ -1202,7 +1203,7 @@ function schedulePhoneGatewayExpiry(): void {
     stopClashConfigServer()
     broadcast('phone-gateway:expired', {})
     if (proxyCredentials && isSidecarRunning()) {
-      void startSidecar(proxyCredentials.password, undefined, undefined, loadSettings().proxyServices).then((result) => {
+      void startSidecar(proxyCredentials.password, currentFrontProxy, undefined, loadSettings().proxyServices).then((result) => {
         if (result.ok) void applyRendererProxy()
       })
     }
@@ -1258,7 +1259,7 @@ async function runProxyHealthCheck(source?: string): Promise<void> {
     if (!isSidecarRunning()) {
       // Xray crashed — restart with same key
       console.log(`[health-check] sidecar not running (${source || 'periodic'}), restarting with same key`)
-      const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig, loadSettings().proxyServices)
+      const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
       if (result.ok) {
         await applyRendererProxy()
         await setSystemProxy().catch(() => {})
@@ -1271,7 +1272,7 @@ async function runProxyHealthCheck(source?: string): Promise<void> {
     const verification = await verifySidecar()
     if (!verification.ok && proxyCredentials) {
       console.log(`[health-check] verification failed (${source || 'periodic'}), restarting with same key`)
-      const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig, loadSettings().proxyServices)
+      const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
       if (result.ok) {
         await applyRendererProxy()
         startHelper()
@@ -1304,17 +1305,25 @@ ipcMain.handle('sidecar:start', async () => {
 
   const authRes = await authFetch('GET', '/api/proxy-auth/login')
   if (authRes.status !== 200) {
-    return {
-      ok: false,
-      error: getResponseMessage(authRes.data, 'Failed to get proxy credentials')
-    }
+    return { ok: false, error: getResponseMessage(authRes.data, 'Failed to get proxy credentials') }
   }
   const creds = authRes.data as ProxyCredentials
   proxyCredentials = creds
   console.log('[proxy-auth] got credentials')
 
+  currentFrontProxy = null
+  const fpRes = await authFetch('GET', '/api/proxy-auth/front-proxy')
+  if (fpRes.status === 200 && (fpRes.data as any)?.enabled) {
+    const fp = fpRes.data as { server: string; port: number; uuid: string }
+    const probe = await probeTcpEndpoint(fp.server, fp.port)
+    if (!probe.ok) {
+      return { ok: false, error: 'FRONT_PROXY_UNAVAILABLE' }
+    }
+    currentFrontProxy = { server: fp.server, port: fp.port, uuid: fp.uuid }
+  }
+
   currentPreProxy = null
-  const result = await startSidecar(creds.password, undefined, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(creds.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
   if (result.ok) {
     await applyRendererProxy()
     await setSystemProxy().catch(() => {})
@@ -1331,6 +1340,7 @@ ipcMain.handle('sidecar:stop', async () => {
 
   proxyCredentials = null
   currentPreProxy = null
+  currentFrontProxy = null
   phoneGatewayConfig = null
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopProxyMonitor()
@@ -1353,12 +1363,18 @@ ipcMain.handle('sidecar:proxy-status', () => {
   return { running: isSidecarRunning(), port: getLocalPort(), preProxy: currentPreProxy }
 })
 
+ipcMain.handle('front-proxy:status', async () => {
+  const res = await authFetch('GET', '/api/proxy-auth/front-proxy')
+  if (res.status === 200 && (res.data as any)?.enabled) return { enabled: true }
+  return { enabled: false }
+})
+
 ipcMain.handle('sidecar:verify', async () => {
   const first = await verifySidecar()
   if (first.ok || !isSidecarRunning() || !proxyCredentials) return first
 
   // Restart with same key instead of fetching new credentials
-  const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
   if (!result.ok) {
     return { ok: false, error: result.error || first.error || 'Proxy recovery failed' }
   }
@@ -1377,10 +1393,10 @@ ipcMain.handle('phone-gateway:enable', async () => {
   const nextConfig = createPhoneGatewayConfig()
   const previousConfig = phoneGatewayConfig
   phoneGatewayConfig = nextConfig
-  const result = await startSidecar(proxyCredentials.password, undefined, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
   if (!result.ok) {
     phoneGatewayConfig = previousConfig
-    if (previousConfig) await startSidecar(proxyCredentials.password, undefined, previousConfig, loadSettings().proxyServices).catch(() => {})
+    if (previousConfig) await startSidecar(proxyCredentials.password, currentFrontProxy, previousConfig, loadSettings().proxyServices).catch(() => {})
     return { ok: false, error: result.error || 'enable-failed' }
   }
 
@@ -1401,7 +1417,7 @@ ipcMain.handle('phone-gateway:disable', async () => {
   removeFirewallRule()
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   if (proxyCredentials && isSidecarRunning()) {
-    const result = await startSidecar(proxyCredentials.password, undefined, undefined, loadSettings().proxyServices)
+    const result = await startSidecar(proxyCredentials.password, currentFrontProxy, undefined, loadSettings().proxyServices)
     if (!result.ok) return { ok: false, error: result.error || 'disable-failed' }
     await applyRendererProxy()
     await setSystemProxy().catch(() => {})

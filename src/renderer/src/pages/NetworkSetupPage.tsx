@@ -28,7 +28,7 @@ interface SystemProxyInfo {
   port?: string
 }
 
-type ProxyServices = 'claude' | 'chatgpt' | 'both'
+type ProxyServices = 'off' | 'claude' | 'chatgpt' | 'both'
 type View = 'detecting' | 'result' | 'optimizing'
 
 function getPurity(info: IpInfo): 'clean' | 'proxy' | 'datacenter' {
@@ -67,11 +67,13 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   const [step, setStep] = useState(0)
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
   const [proxyServices, setProxyServices] = useState<ProxyServices>('both')
+  const [isWhitelist, setIsWhitelist] = useState(false)
 
   useEffect(() => {
     window.electronAPI.settings.get().then((s) => {
       if (s.proxyServices) setProxyServices(s.proxyServices)
     })
+    window.electronAPI.frontProxy.status().then((r) => setIsWhitelist(!!r.enabled)).catch(() => {})
   }, [])
 
   const detectEnvironment = useCallback(async () => {
@@ -104,7 +106,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
   }, [detectEnvironment])
 
   const startOptimize = useCallback(async () => {
-    if (!ipInfo || systemProxy.found || ipInfo.isChina) return
+    if (!ipInfo || systemProxy.found || (!isWhitelist && ipInfo.isChina)) return
 
     const currentSettings = await window.electronAPI.settings.get()
     await window.electronAPI.settings.set({ ...currentSettings, proxyServices })
@@ -121,7 +123,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     setProgress(45)
     const startResult = await window.electronAPI.sidecar.start()
     if (!startResult.ok) {
-      setOptimizeError(startResult.error || 'Failed to start proxy')
+      setOptimizeError(startResult.error === 'FRONT_PROXY_UNAVAILABLE' ? t.network.frontProxyUnavailable : (startResult.error || 'Failed to start proxy'))
       return
     }
 
@@ -136,7 +138,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
 
     setStep(3)
     setProgress(100)
-  }, [ipInfo, systemProxy.found, proxyServices])
+  }, [ipInfo, systemProxy.found, proxyServices, isWhitelist, t.network])
 
   const steps = [
     t.network.stepDetect,
@@ -186,7 +188,7 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     }
 
     const hasSystemProxy = systemProxy.found
-    const canOptimize = !hasSystemProxy && !ipInfo.isChina
+    const canOptimize = !hasSystemProxy && (isWhitelist || !ipInfo.isChina)
     const purity = getPurity(ipInfo)
     const locationStr = `${ipInfo.country} \u00B7 ${ipInfo.city}`
     const proxyValue = hasSystemProxy
@@ -253,11 +255,19 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
               ok={!hasSystemProxy}
               value={proxyValue}
             />
-            <RequirementRow
-              label={t.network.directRouteLabel}
-              ok={!ipInfo.isChina}
-              value={ipInfo.isChina ? t.network.routeChina : t.network.routeOverseas}
-            />
+            {isWhitelist ? (
+              <RequirementRow
+                label={t.network.gatewayLabel}
+                ok={true}
+                value={t.network.gatewayReady}
+              />
+            ) : (
+              <RequirementRow
+                label={t.network.directRouteLabel}
+                ok={!ipInfo.isChina}
+                value={ipInfo.isChina ? t.network.routeChina : t.network.routeOverseas}
+              />
+            )}
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-text-faint font-mono">{t.network.purity}</span>
               <div className="flex items-center gap-1.5">
@@ -285,8 +295,10 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
         )}
 
         <div className="flex items-center gap-2 mb-4">
-          <span className="text-[11px] text-text-faint font-mono mr-1">{t.network.serviceLabel}</span>
-          {(['claude', 'chatgpt', 'both'] as const).map((v) => (
+          <span className="text-[11px] text-text-faint font-mono mr-1">
+            {isWhitelist ? t.network.layer2Label : t.network.serviceLabel}
+          </span>
+          {(isWhitelist ? (['off', 'claude', 'chatgpt', 'both'] as const) : (['claude', 'chatgpt', 'both'] as const)).map((v) => (
             <button
               key={v}
               onClick={() => setProxyServices(v)}
@@ -296,10 +308,16 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
                   : 'bg-bg-card border border-border text-text-secondary hover:border-brand/40'
               }`}
             >
-              {v === 'claude' ? t.network.serviceClaude : v === 'chatgpt' ? t.network.serviceChatgpt : t.network.serviceBoth}
+              {v === 'off' ? t.network.serviceOff
+                : v === 'claude' ? t.network.serviceClaude
+                : v === 'chatgpt' ? t.network.serviceChatgpt
+                : t.network.serviceBoth}
             </button>
           ))}
         </div>
+        {isWhitelist && (
+          <p className="text-[11px] text-text-faint mb-4 text-center max-w-[400px]">{t.network.layer2Hint}</p>
+        )}
 
         <div className="flex items-center gap-3">
           <button
