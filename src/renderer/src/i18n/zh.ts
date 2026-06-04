@@ -111,6 +111,8 @@ export const zh = {
     serviceBoth: 'ChatGPT + Claude',
     gatewayLabel: '日本专线',
     gatewayReady: '就绪',
+    gatewayReadyTitle: '日本专线已就绪',
+    gatewayReadyDesc: '已检测到日本专线。连接后非大陆流量将经专线加速；可在下方选择是否让 AI 服务走美国住宅出口。',
     layer2Label: '第二层（美国住宅）',
     layer2Hint: '选中的服务走美国住宅出口，其余非大陆流量走日本专线出口。',
     serviceOff: '关闭',

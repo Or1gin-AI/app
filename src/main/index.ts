@@ -190,7 +190,7 @@ function createWindow(): void {
 
   const mainWindow = new BrowserWindow({
     width: 800,
-    height: 600,
+    height: 720,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
