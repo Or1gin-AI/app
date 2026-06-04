@@ -201,6 +201,9 @@ export function NetworkSetupPage({ onComplete }: NetworkSetupPageProps) {
     if (hasSystemProxy) {
       title = t.network.systemProxyTitle
       description = ipInfo.isChina ? t.network.systemProxyTunDesc : t.network.systemProxyDesc
+    } else if (isWhitelist) {
+      title = t.network.gatewayReadyTitle
+      description = t.network.gatewayReadyDesc
     } else if (ipInfo.isChina) {
       title = t.network.tunRequiredTitle
       description = t.network.tunRequiredDesc
