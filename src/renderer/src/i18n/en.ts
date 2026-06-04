@@ -111,6 +111,8 @@ export const en = {
     serviceBoth: 'ChatGPT + Claude',
     gatewayLabel: 'Dedicated Line',
     gatewayReady: 'Ready',
+    gatewayReadyTitle: 'Dedicated Line Ready',
+    gatewayReadyDesc: 'The Japan dedicated line is available. Once connected, all non-China traffic is accelerated through it; choose below whether AI services exit via US residential.',
     layer2Label: 'US Residential',
     layer2Hint: 'Selected services exit via US residential; all other non-China traffic exits via the dedicated line.',
     serviceOff: 'Off',
