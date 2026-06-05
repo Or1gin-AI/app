@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.4.2 - 2026-06-05
+
+### 中文
+
+- 新增桌面应用代理支持：启用网络优化时，自动向 macOS 图形会话注入代理环境变量（`launchctl setenv`），使 Claude Desktop、Codex 等不读取系统代理的桌面应用也能走代理；关闭网络优化或退出应用时自动清除。
+- 主界面新增提示：启用网络优化后，Claude Desktop、Codex Desktop 等桌面应用可能需要重启后才会走代理。
+- 自动更新检查间隔由每小时缩短为每 2 分钟，客户端可更快获取新版本。
+
+### English
+
+- Added desktop-app proxy coverage: when network optimization is enabled, proxy environment variables are now injected into the macOS GUI session (`launchctl setenv`), so desktop apps that ignore the system proxy — such as Claude Desktop and Codex — also route through the proxy. They are cleared automatically when optimization is turned off or the app quits.
+- Added an in-app notice that desktop apps such as Claude Desktop and Codex Desktop may need to be restarted after enabling network optimization before they use the proxy.
+- Reduced the auto-update check interval from hourly to every 2 minutes so clients pick up new releases faster.
+
 ## v0.2.6 - 2026-04-13
 
 ### 中文

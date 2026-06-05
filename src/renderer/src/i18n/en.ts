@@ -188,6 +188,7 @@ export const en = {
       desc: 'Login with web account via OAuth',
       descLine2: 'Authentic official experience',
       newTerminalWarning: 'You must open a new terminal session after network optimization is enabled, or proxy settings will not take effect.',
+      desktopAppWarning: 'After enabling network optimization, desktop apps such as Claude Desktop and Codex Desktop may need to be restarted before they use the proxy.',
       step1: 'Open terminal, run',
       step2: 'Select',
       step2method: 'Use OAuth',
