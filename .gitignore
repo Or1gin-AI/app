@@ -4,6 +4,8 @@ dist
 .superpowers
 .DS_Store
 .env
+.env.signing.local
+.env.*.local
 
 # Xray binaries & geo data (downloaded by scripts/download-xray.sh)
 resources/sidecar/*/xray
