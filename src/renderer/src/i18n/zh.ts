@@ -188,6 +188,7 @@ export const zh = {
       desc: '通过 OAuth 使用网页版账号登录',
       descLine2: '真实可靠的官网原版',
       newTerminalWarning: '完成网络优化后必须打开一个新的终端会话，否则代理设置不会生效。',
+      desktopAppWarning: '启用网络优化后，Claude Desktop、Codex Desktop 等桌面应用可能需要重启后才会走代理。',
       step1: '打开终端，运行',
       step2: '选择',
       step2method: 'Use OAuth',

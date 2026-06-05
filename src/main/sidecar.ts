@@ -815,6 +815,8 @@ export function setShellProxy(): void {
       writeFileSync(profile, content)
     } catch { /* skip if no permission */ }
   }
+  // GUI apps launched from Dock/Finder don't source shell rc; inject the GUI-session env too.
+  setLaunchctlProxy()
 }
 
 export function clearShellProxy(): void {
@@ -846,5 +848,38 @@ export function clearShellProxy(): void {
       content = content.replace(re, '\n')
       writeFileSync(profile, content)
     } catch { /* skip */ }
+  }
+  clearLaunchctlProxy()
+}
+
+// ── macOS GUI-session env via launchctl ──
+// Shell rc injection above only reaches CLIs launched from a Terminal that sources them.
+// GUI apps launched from Dock/Finder inherit the launchd GUI-session env instead — and some
+// (e.g. Codex, whose Rust/reqwest core ignores the system PAC proxy entirely) have no other
+// way to be routed. `launchctl setenv` injects there so they go through the local proxy too.
+// Caveat: only affects processes started AFTER it runs, so the target app must be restarted
+// to pick up (or drop) the change — we cannot mutate an already-running process's environment.
+const LAUNCHCTL_PROXY_VARS: ReadonlyArray<readonly [string, string]> = [
+  ['http_proxy', PROXY_URL],
+  ['https_proxy', PROXY_URL],
+  ['HTTP_PROXY', PROXY_URL],
+  ['HTTPS_PROXY', PROXY_URL],
+  ['all_proxy', PROXY_URL],
+  ['ALL_PROXY', PROXY_URL],
+  ['no_proxy', 'localhost,127.0.0.1,::1'],
+  ['NO_PROXY', 'localhost,127.0.0.1,::1'],
+]
+
+function setLaunchctlProxy(): void {
+  if (process.platform !== 'darwin') return
+  for (const [key, val] of LAUNCHCTL_PROXY_VARS) {
+    execFile('launchctl', ['setenv', key, val], { windowsHide: true }, () => {})
+  }
+}
+
+function clearLaunchctlProxy(): void {
+  if (process.platform !== 'darwin') return
+  for (const [key] of LAUNCHCTL_PROXY_VARS) {
+    execFile('launchctl', ['unsetenv', key], { windowsHide: true }, () => {})
   }
 }

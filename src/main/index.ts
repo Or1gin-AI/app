@@ -1511,7 +1511,8 @@ function setupAutoUpdater(): void {
   })
 
   autoUpdater.checkForUpdates().catch(() => { })
-  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 60 * 1000)
+  // Poll for updates every 2 minutes so clients pick up new releases quickly
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 2 * 60 * 1000)
 }
 
 function broadcast(channel: string, data: unknown): void {
