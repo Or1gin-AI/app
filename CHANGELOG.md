@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.3 - 2026-06-12
+
+### 中文
+
+- 海外白名单用户直连：启用网络优化时，若检测到出口 IP 已在海外，则跳过日本专线网关，直接走代理，连接更快、链路更短。
+- 代理环境注入优化：不再向 `.zshenv` 写入代理变量（它会被所有 zsh 进程包括非交互式脚本读取，应用关闭后易导致脚本网络中断）；不再注入 `all_proxy`/`ALL_PROXY`（Codex 等基于 reqwest 的桌面应用认 `HTTPS_PROXY` 即可路由，已实测验证）。旧版本写入的这两项会在启用、退出、启动时自动清理。
+
+### English
+
+- Direct routing for overseas whitelist users: when network optimization is enabled and the exit IP is detected to already be overseas, the Japan gateway is skipped and traffic goes through the proxy directly — fewer hops, faster connection.
+- Proxy-env injection cleanup: stopped writing proxy variables into `.zshenv` (it is sourced by every zsh process including non-interactive scripts, which break once the app is closed); stopped injecting `all_proxy`/`ALL_PROXY` (reqwest-based desktop apps such as Codex route fine via `HTTPS_PROXY`, verified empirically). Both legacy entries are cleaned up automatically on enable, quit, and startup.
+
 ## v1.4.2 - 2026-06-05
 
 ### 中文
