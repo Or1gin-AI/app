@@ -522,7 +522,7 @@ async function fetchProxyIpWithRetry(): Promise<string | null> {
 
   // Restart Xray with same key and retry
   console.log('[proxy] IP check failed, restarting with same key')
-  const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(proxyCredentials.password, effectiveFrontProxy(), phoneGatewayConfig, loadSettings().proxyServices)
   if (!result.ok) {
     console.warn('[proxy] restart failed:', result.error)
     return null
@@ -1057,11 +1057,17 @@ type ProxyCredentials = { username: string; password: string }
 let proxyCredentials: ProxyCredentials | null = null
 let currentPreProxy: string | null = null // e.g. '127.0.0.1:7890' or null if direct
 let currentFrontProxy: FrontProxyConfig | null = null
+let isUserOverseas = false
 let proxyHealthCheckInterval: ReturnType<typeof setInterval> | null = null
 let proxyHealthCheckInFlight = false
 let proxyLifecycleVersion = 0
 let phoneGatewayConfig: PhoneGatewayConfig | null = null
 let phoneGatewayExpiryTimer: ReturnType<typeof setTimeout> | null = null
+
+// Whitelist users overseas don't need the gateway — direct proxy is faster
+function effectiveFrontProxy(): FrontProxyConfig | null {
+  return (currentFrontProxy && !isUserOverseas) ? currentFrontProxy : null
+}
 
 function getPrimaryLanIp(): string {
   const nets = networkInterfaces()
@@ -1203,7 +1209,7 @@ function schedulePhoneGatewayExpiry(): void {
     stopClashConfigServer()
     broadcast('phone-gateway:expired', {})
     if (proxyCredentials && isSidecarRunning()) {
-      void startSidecar(proxyCredentials.password, currentFrontProxy, undefined, loadSettings().proxyServices).then((result) => {
+      void startSidecar(proxyCredentials.password, effectiveFrontProxy(), undefined, loadSettings().proxyServices).then((result) => {
         if (result.ok) void applyRendererProxy()
       })
     }
@@ -1259,7 +1265,7 @@ async function runProxyHealthCheck(source?: string): Promise<void> {
     if (!isSidecarRunning()) {
       // Xray crashed — restart with same key
       console.log(`[health-check] sidecar not running (${source || 'periodic'}), restarting with same key`)
-      const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
+      const result = await startSidecar(proxyCredentials.password, effectiveFrontProxy(), phoneGatewayConfig, loadSettings().proxyServices)
       if (result.ok) {
         await applyRendererProxy()
         await setSystemProxy().catch(() => {})
@@ -1272,7 +1278,7 @@ async function runProxyHealthCheck(source?: string): Promise<void> {
     const verification = await verifySidecar()
     if (!verification.ok && proxyCredentials) {
       console.log(`[health-check] verification failed (${source || 'periodic'}), restarting with same key`)
-      const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
+      const result = await startSidecar(proxyCredentials.password, effectiveFrontProxy(), phoneGatewayConfig, loadSettings().proxyServices)
       if (result.ok) {
         await applyRendererProxy()
         startHelper()
@@ -1312,6 +1318,7 @@ ipcMain.handle('sidecar:start', async () => {
   console.log('[proxy-auth] got credentials')
 
   currentFrontProxy = null
+  isUserOverseas = false
   const fpRes = await authFetch('GET', '/api/proxy-auth/front-proxy')
   if (fpRes.status === 200 && (fpRes.data as any)?.enabled) {
     const fp = fpRes.data as { server: string; port: number; uuid: string }
@@ -1320,10 +1327,20 @@ ipcMain.handle('sidecar:start', async () => {
       return { ok: false, error: 'FRONT_PROXY_UNAVAILABLE' }
     }
     currentFrontProxy = { server: fp.server, port: fp.port, uuid: fp.uuid }
+
+    // Detect if user is already overseas — skip gateway if so
+    const directIp = await fetchExitIpDirect()
+    if (directIp) {
+      const info = await lookupDirectIpInfo(directIp)
+      if (info && !info.isChina) {
+        isUserOverseas = true
+        console.log('[proxy] whitelist user detected overseas, skipping gateway')
+      }
+    }
   }
 
   currentPreProxy = null
-  const result = await startSidecar(creds.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(creds.password, effectiveFrontProxy(), phoneGatewayConfig, loadSettings().proxyServices)
   if (result.ok) {
     await applyRendererProxy()
     await setSystemProxy().catch(() => {})
@@ -1341,6 +1358,7 @@ ipcMain.handle('sidecar:stop', async () => {
   proxyCredentials = null
   currentPreProxy = null
   currentFrontProxy = null
+  isUserOverseas = false
   phoneGatewayConfig = null
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   stopProxyMonitor()
@@ -1374,7 +1392,7 @@ ipcMain.handle('sidecar:verify', async () => {
   if (first.ok || !isSidecarRunning() || !proxyCredentials) return first
 
   // Restart with same key instead of fetching new credentials
-  const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(proxyCredentials.password, effectiveFrontProxy(), phoneGatewayConfig, loadSettings().proxyServices)
   if (!result.ok) {
     return { ok: false, error: result.error || first.error || 'Proxy recovery failed' }
   }
@@ -1393,10 +1411,10 @@ ipcMain.handle('phone-gateway:enable', async () => {
   const nextConfig = createPhoneGatewayConfig()
   const previousConfig = phoneGatewayConfig
   phoneGatewayConfig = nextConfig
-  const result = await startSidecar(proxyCredentials.password, currentFrontProxy, phoneGatewayConfig, loadSettings().proxyServices)
+  const result = await startSidecar(proxyCredentials.password, effectiveFrontProxy(), phoneGatewayConfig, loadSettings().proxyServices)
   if (!result.ok) {
     phoneGatewayConfig = previousConfig
-    if (previousConfig) await startSidecar(proxyCredentials.password, currentFrontProxy, previousConfig, loadSettings().proxyServices).catch(() => {})
+    if (previousConfig) await startSidecar(proxyCredentials.password, effectiveFrontProxy(), previousConfig, loadSettings().proxyServices).catch(() => {})
     return { ok: false, error: result.error || 'enable-failed' }
   }
 
@@ -1417,7 +1435,7 @@ ipcMain.handle('phone-gateway:disable', async () => {
   removeFirewallRule()
   if (phoneGatewayExpiryTimer) { clearTimeout(phoneGatewayExpiryTimer); phoneGatewayExpiryTimer = null }
   if (proxyCredentials && isSidecarRunning()) {
-    const result = await startSidecar(proxyCredentials.password, currentFrontProxy, undefined, loadSettings().proxyServices)
+    const result = await startSidecar(proxyCredentials.password, effectiveFrontProxy(), undefined, loadSettings().proxyServices)
     if (!result.ok) return { ok: false, error: result.error || 'disable-failed' }
     await applyRendererProxy()
     await setSystemProxy().catch(() => {})
@@ -1591,6 +1609,7 @@ app.whenReady().then(async () => {
   // Clean up any orphaned processes left by a previous crash
   killOrphanedSidecar()
   await killOrphanedHelper()
+  clearShellProxy()
 
   // Crash recovery: if system proxy points to our port but Xray isn't running, clean up
   // MUST complete before creating window — stale proxy breaks outbound requests
