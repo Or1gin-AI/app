@@ -743,12 +743,13 @@ set -gx HTTP_PROXY "${PROXY_URL}"
 set -gx HTTPS_PROXY "${PROXY_URL}"
 ${MARKER_END}`
 
-function getShellProfiles(): string[] {
+function getShellProfiles(opts: { includeLegacyZshEnv?: boolean } = {}): string[] {
   const home = homedir()
   if (process.platform === 'win32') return []
-  // Cover all common Unix shells — inject into every profile that exists or is likely used
+  // Cover common interactive Unix shells. Keep .zshenv out of new writes because
+  // it is sourced by every zsh process, including non-interactive scripts.
   return [
-    join(home, '.zshenv'),     // zsh (loaded for every zsh session, interactive or not)
+    ...(opts.includeLegacyZshEnv ? [join(home, '.zshenv')] : []),
     join(home, '.zshrc'),      // zsh interactive
     join(home, '.bashrc'),     // bash interactive
     join(home, '.bash_profile'), // bash login (macOS Terminal.app uses login shell)
@@ -840,7 +841,7 @@ export function clearShellProxy(): void {
     return
   }
 
-  for (const profile of getShellProfiles()) {
+  for (const profile of getShellProfiles({ includeLegacyZshEnv: true })) {
     try {
       if (!existsSync(profile)) continue
       let content = readFileSync(profile, 'utf-8')
@@ -855,8 +856,8 @@ export function clearShellProxy(): void {
 // ── macOS GUI-session env via launchctl ──
 // Shell rc injection above only reaches CLIs launched from a Terminal that sources them.
 // GUI apps launched from Dock/Finder inherit the launchd GUI-session env instead — and some
-// (e.g. Codex, whose Rust/reqwest core ignores the system PAC proxy entirely) have no other
-// way to be routed. `launchctl setenv` injects there so they go through the local proxy too.
+// (e.g. Codex, whose Rust/reqwest core ignores the system PAC proxy but does honor HTTPS_PROXY)
+// have no other way to be routed. `launchctl setenv` injects there so they go through the local proxy.
 // Caveat: only affects processes started AFTER it runs, so the target app must be restarted
 // to pick up (or drop) the change — we cannot mutate an already-running process's environment.
 const LAUNCHCTL_PROXY_VARS: ReadonlyArray<readonly [string, string]> = [
@@ -864,14 +865,17 @@ const LAUNCHCTL_PROXY_VARS: ReadonlyArray<readonly [string, string]> = [
   ['https_proxy', PROXY_URL],
   ['HTTP_PROXY', PROXY_URL],
   ['HTTPS_PROXY', PROXY_URL],
-  ['all_proxy', PROXY_URL],
-  ['ALL_PROXY', PROXY_URL],
   ['no_proxy', 'localhost,127.0.0.1,::1'],
   ['NO_PROXY', 'localhost,127.0.0.1,::1'],
 ]
 
+const LEGACY_LAUNCHCTL_PROXY_KEYS = ['all_proxy', 'ALL_PROXY']
+
 function setLaunchctlProxy(): void {
   if (process.platform !== 'darwin') return
+  for (const key of LEGACY_LAUNCHCTL_PROXY_KEYS) {
+    execFile('launchctl', ['unsetenv', key], { windowsHide: true }, () => {})
+  }
   for (const [key, val] of LAUNCHCTL_PROXY_VARS) {
     execFile('launchctl', ['setenv', key, val], { windowsHide: true }, () => {})
   }
@@ -879,7 +883,7 @@ function setLaunchctlProxy(): void {
 
 function clearLaunchctlProxy(): void {
   if (process.platform !== 'darwin') return
-  for (const [key] of LAUNCHCTL_PROXY_VARS) {
+  for (const key of [...LAUNCHCTL_PROXY_VARS.map(([key]) => key), ...LEGACY_LAUNCHCTL_PROXY_KEYS]) {
     execFile('launchctl', ['unsetenv', key], { windowsHide: true }, () => {})
   }
 }
