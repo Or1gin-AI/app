@@ -4,6 +4,12 @@ export interface FrontProxyConfig {
   server: string
   port: number
   uuid: string
+  security?: 'none' | 'reality'
+  flow?: string
+  serverName?: string
+  fingerprint?: string
+  publicKey?: string
+  shortId?: string
 }
 
 export interface PhoneGatewayLike {
@@ -40,12 +46,31 @@ export function buildXrayConfig(opts: BuildOpts): object {
   const outbounds: Record<string, unknown>[] = [{ tag: 'direct', protocol: 'freedom' }]
 
   if (whitelist) {
+    const gatewayUser: Record<string, unknown> = {
+      id: frontProxy!.uuid,
+      encryption: 'none',
+    }
+    if (frontProxy!.flow) gatewayUser.flow = frontProxy!.flow
+
+    const gatewayStreamSettings: Record<string, unknown> = {
+      network: 'tcp',
+      security: frontProxy!.security ?? 'none',
+    }
+    if (frontProxy!.security === 'reality') {
+      gatewayStreamSettings.realitySettings = {
+        serverName: frontProxy!.serverName,
+        fingerprint: frontProxy!.fingerprint ?? 'chrome',
+        password: frontProxy!.publicKey,
+        shortId: frontProxy!.shortId,
+      }
+    }
+
     outbounds.push({
       tag: 'gateway', protocol: 'vless',
-      settings: { vnext: [{ address: frontProxy!.server, port: frontProxy!.port, users: [{ id: frontProxy!.uuid, encryption: 'none' }] }] },
-      streamSettings: { network: 'tcp', security: 'none' },
+      settings: { vnext: [{ address: frontProxy!.server, port: frontProxy!.port, users: [gatewayUser] }] },
+      streamSettings: gatewayStreamSettings,
     })
-    // Chain the shadowsocks proxy through the Japan gateway at the dialer (TCP) layer.
+    // Chain the shadowsocks proxy through the dedicated gateway at the dialer (TCP) layer.
     // NOTE: outbound-level `proxySettings: { tag }` does NOT compose with this ws/tls
     // shadowsocks outbound (connection fails); `sockopt.dialerProxy` is the working form.
     ;(proxyOutbound.streamSettings as Record<string, unknown>).sockopt = { dialerProxy: 'gateway' }

@@ -1321,12 +1321,22 @@ ipcMain.handle('sidecar:start', async () => {
   isUserOverseas = false
   const fpRes = await authFetch('GET', '/api/proxy-auth/front-proxy')
   if (fpRes.status === 200 && (fpRes.data as any)?.enabled) {
-    const fp = fpRes.data as { server: string; port: number; uuid: string }
+    const fp = fpRes.data as FrontProxyConfig & { enabled: true }
     const probe = await probeTcpEndpoint(fp.server, fp.port)
     if (!probe.ok) {
       return { ok: false, error: 'FRONT_PROXY_UNAVAILABLE' }
     }
-    currentFrontProxy = { server: fp.server, port: fp.port, uuid: fp.uuid }
+    currentFrontProxy = {
+      server: fp.server,
+      port: fp.port,
+      uuid: fp.uuid,
+      security: fp.security,
+      flow: fp.flow,
+      serverName: fp.serverName,
+      fingerprint: fp.fingerprint,
+      publicKey: fp.publicKey,
+      shortId: fp.shortId,
+    }
 
     // Detect if user is already overseas — skip gateway if so
     const directIp = await fetchExitIpDirect()
