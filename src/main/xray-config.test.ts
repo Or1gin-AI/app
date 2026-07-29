@@ -13,6 +13,17 @@ const BASE: BuildOpts = {
   chatgptDomains: ['regexp:.*openai.*'],
 }
 const FP = { server: '64.83.46.210', port: 12690, uuid: 'uuid-1' }
+const REALITY_FP = {
+  server: 'hk.example.com',
+  port: 443,
+  uuid: 'uuid-reality',
+  security: 'reality' as const,
+  flow: 'xtls-rprx-vision',
+  serverName: 'www.example.com',
+  fingerprint: 'chrome',
+  publicKey: 'public-key',
+  shortId: 'short-id',
+}
 
 function outboundTags(cfg: any): string[] { return cfg.outbounds.map((o: any) => o.tag) }
 function rules(cfg: any): any[] { return cfg.routing.rules }
@@ -49,5 +60,26 @@ describe('buildXrayConfig', () => {
     expect(rules(cfg).some(r => r.outboundTag === 'proxy')).toBe(false)
     const last = rules(cfg)[rules(cfg).length - 1]
     expect(last.outboundTag).toBe('gateway')
+  })
+
+  it('whitelist Reality gateway: emits VLESS Vision and Reality transport settings', () => {
+    const cfg: any = buildXrayConfig({ ...BASE, frontProxy: REALITY_FP })
+    const gateway = cfg.outbounds.find((o: any) => o.tag === 'gateway')
+
+    expect(gateway.settings.vnext[0].users[0]).toMatchObject({
+      id: 'uuid-reality',
+      encryption: 'none',
+      flow: 'xtls-rprx-vision',
+    })
+    expect(gateway.streamSettings).toMatchObject({
+      network: 'tcp',
+      security: 'reality',
+      realitySettings: {
+        serverName: 'www.example.com',
+        fingerprint: 'chrome',
+        password: 'public-key',
+        shortId: 'short-id',
+      },
+    })
   })
 })
