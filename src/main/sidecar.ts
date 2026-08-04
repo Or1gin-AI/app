@@ -89,7 +89,7 @@ export function onSidecarCrash(cb: (reason: string) => void): void {
 
 const REMOTE = {
   address: 'p.originai.cc',
-  port: 443,
+  port: 8443,
   serverName: 'p.originai.cc',
   wsPath: '/update',
   method: 'aes-256-gcm',

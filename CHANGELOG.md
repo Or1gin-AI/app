@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.5 - 2026-08-04
+
+### 中文
+
+- 代理网关端口从 443 调整为 8443：上游服务器的 443 入站被云服务商临时封禁，客户端改用 8443 端口连接同一网关（`p.originai.cc`），链路与协议不变，恢复连接。
+
+### English
+
+- Proxy gateway port changed from 443 to 8443: inbound 443 on the upstream server was temporarily blocked by the cloud provider, so the client now connects to the same gateway (`p.originai.cc`) over port 8443. Link and protocol are unchanged; connectivity is restored.
+
 ## v1.4.3 - 2026-06-12
 
 ### 中文
