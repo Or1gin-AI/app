@@ -158,6 +158,7 @@ export const en = {
   },
   main: {
     pureGatewayLabel: 'Dedicated line only',
+    usage: { today: 'Today', month: 'This month' },
     claudeWeb: {
       label: 'CLAUDE WEB / DESKTOP',
       title: 'Web / Desktop',

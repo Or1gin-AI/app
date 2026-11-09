@@ -130,6 +130,13 @@ function captureSession(data: unknown): void {
   }
 }
 
+// better-auth answers get-session with 200 and a `null` body when the session
+// no longer exists (e.g. kicked by a login on another device), not with 401.
+function isLiveSession(res: { status: number; data: unknown }): boolean {
+  if (res.status !== 200 || !res.data || typeof res.data !== 'object') return false
+  return !!(res.data as AuthSessionPayload).user
+}
+
 async function authFetch(
   method: string,
   path: string,
@@ -669,7 +676,7 @@ async function runSessionCheck(): Promise<void> {
   sessionCheckInFlight = true
   try {
     const res = await withTimeout(authFetch('GET', '/api/auth/get-session'), 8_000, 'session check')
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401 || res.status === 403 || (res.status === 200 && !isLiveSession(res))) {
       handleSessionKicked()
     }
   } catch {
@@ -784,7 +791,7 @@ ipcMain.handle('auth:restore-session', async () => {
 
   // Verify session is still valid
   const res = await authFetch('GET', '/api/auth/get-session')
-  if (res.status === 200) {
+  if (isLiveSession(res)) {
     captureSession(res.data)
     return { ok: true, user: sessionUser }
   }
@@ -857,6 +864,10 @@ ipcMain.handle('auth:sign-out', async () => {
 })
 
 // Proxy auth IPC handler
+ipcMain.handle('traffic:usage', async () => {
+  return authFetch('GET', '/api/traffic/usage')
+})
+
 ipcMain.handle('proxy-auth:login', async () => {
   return authFetch('GET', '/api/proxy-auth/login')
 })

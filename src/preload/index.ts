@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   proxyAuth: {
     login: () => ipcRenderer.invoke('proxy-auth:login'),
   },
+  traffic: {
+    usage: () => ipcRenderer.invoke('traffic:usage'),
+  },
   sms: {
     requestNumber: (target?: string) => ipcRenderer.invoke('sms:request-number', target),
     phoneNumber: (target?: string) => ipcRenderer.invoke('sms:phone-number', target),

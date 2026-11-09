@@ -71,6 +71,9 @@ declare global {
       proxyAuth: {
         login: () => Promise<AuthResponse>
       }
+      traffic: {
+        usage: () => Promise<AuthResponse>
+      }
       sms: {
         requestNumber: (target?: string) => Promise<AuthResponse>
         phoneNumber: (target?: string) => Promise<AuthResponse>

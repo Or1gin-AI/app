@@ -158,6 +158,7 @@ export const zh = {
   },
   main: {
     pureGatewayLabel: '纯专线模式',
+    usage: { today: '今日流量', month: '本月流量' },
     claudeWeb: {
       label: 'CLAUDE WEB / DESKTOP',
       title: '网页版 / 桌面版',

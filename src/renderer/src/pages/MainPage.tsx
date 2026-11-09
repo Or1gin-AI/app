@@ -216,6 +216,39 @@ function PhoneGatewayInline() {
   )
 }
 
+interface UsageTotals { total: number }
+interface TrafficUsage { today: UsageTotals; thisMonth: UsageTotals }
+
+function formatBytes(n: number): string {
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+// Proxy traffic used by this account (all devices), refreshed every minute.
+function UsageLine() {
+  const { t } = useLocale()
+  const [usage, setUsage] = useState<TrafficUsage | null>(null)
+
+  useEffect(() => {
+    const load = () => {
+      window.electronAPI.traffic.usage().then((res) => {
+        if (res.status === 200 && res.data) setUsage(res.data as TrafficUsage)
+      }).catch(() => {})
+    }
+    load()
+    const timer = setInterval(load, 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  if (!usage) return null
+  return (
+    <span className="text-[11px] text-text-faint font-mono whitespace-nowrap">
+      {t.main.usage.today} {formatBytes(usage.today.total)} · {t.main.usage.month} {formatBytes(usage.thisMonth.total)}
+    </span>
+  )
+}
+
 export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPageProps) {
   const { t } = useLocale()
   const [activeTab, setActiveTab] = useState<'web' | 'code'>('web')
@@ -273,6 +306,7 @@ export function MainPage({ claudeAccountId, hasPaidPlan, networkOk }: MainPagePr
         </div>
 
         <div className="flex items-center gap-2">
+          <UsageLine />
           {proxyServices === 'off' && (
             <span className="text-[11px] text-text-faint font-mono">{t.main.pureGatewayLabel}</span>
           )}
